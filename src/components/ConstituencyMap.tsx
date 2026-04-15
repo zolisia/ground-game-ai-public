@@ -269,9 +269,11 @@ export default function ConstituencyMap() {
         });
 
         // === Ward click popup ===
+        let currentPopup: maplibregl.Popup | null = null;
         const showWardPopup = (e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
           const props = e.features?.[0]?.properties;
           if (!props) return;
+          if (currentPopup) currentPopup.remove();
           const changed = props.winner2024 && props.predictedWinner && props.winner2024 !== props.predictedWinner;
           const partyColor: Record<string, string> = { CON: "#0087DC", LAB: "#DC241f", Reform: "#12B6CF", LIB: "#FAA61A", Green: "#6AB023" };
           const predColor = partyColor[props.predictedWinner] ?? "#666";
@@ -308,7 +310,7 @@ export default function ConstituencyMap() {
               </div>` : ""}
             </div>
           `;
-          new maplibregl.Popup({ closeButton: true, maxWidth: "280px" })
+          currentPopup = new maplibregl.Popup({ closeButton: true, maxWidth: "280px" })
             .setLngLat(e.lngLat)
             .setHTML(popupHtml)
             .addTo(m);
