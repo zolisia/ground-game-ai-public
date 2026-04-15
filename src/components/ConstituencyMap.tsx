@@ -278,7 +278,7 @@ export default function ConstituencyMap() {
           const prevColor = partyColor[props.winner2024] ?? "#666";
           const popupHtml = `
             <div style="font-family: system-ui; padding: 8px; min-width: 250px;">
-              <div style="font-weight: 700; font-size: 14px; margin-bottom: 4px; color: #f1f5f9;">${props.name}</div>
+              <div style="font-weight: 700; font-size: 14px; margin-bottom: 4px; color: #f1f5f9;">${props.name || props.WD24NM || 'Unknown ward'}</div>
               <div style="font-size: 11px; color: #94a3b8; margin-bottom: 8px; display: flex; gap: 12px;">
                 ${props.population ? `<span>Pop: ${Number(props.population).toLocaleString()}</span>` : ""}
                 ${props.electorate ? `<span>Electorate: ${Number(props.electorate).toLocaleString()}</span>` : ""}

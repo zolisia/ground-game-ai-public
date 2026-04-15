@@ -55,7 +55,7 @@ export const wardData = [
   { name: "Hatfield Peverel & Terling", population: 4000, conVote: 42, refVote: 23, labVote: 15, ldVote: 9, grnVote: 8, deprivation: "Low" },
   { name: "Silver End & Cressing", population: 3500, conVote: 35, refVote: 29, labVote: 19, ldVote: 7, grnVote: 7, deprivation: "Medium-High" },
   // Uttlesford District wards within Braintree constituency
-  { name: "Felsted and Stebbing", population: 3800, conVote: 48, refVote: 19, labVote: 11, ldVote: 10, grnVote: 9, deprivation: "Low" },
+  { name: "Felsted & Stebbing", population: 3800, conVote: 48, refVote: 19, labVote: 11, ldVote: 10, grnVote: 9, deprivation: "Low" },
   { name: "The Sampfords", population: 2200, conVote: 50, refVote: 18, labVote: 10, ldVote: 10, grnVote: 10, deprivation: "Low" },
 ];
 
