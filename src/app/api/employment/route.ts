@@ -1,0 +1,174 @@
+import { NextResponse } from "next/server";
+
+// Force dynamic — fetches live external data
+export const dynamic = "force-dynamic";
+
+// NOMIS (ONS) Labour Market Statistics — free, no auth required
+// Docs: https://www.nomisweb.co.uk/api/v01/
+// Geography: Braintree district (TYPE434, post-April 2019) = 1820328091
+// NM_127_1: Model-based unemployment estimates (available at district level)
+// NM_162_1: Claimant count (JSA + UC) (available at district level)
+// NM_17_5: Annual Population Survey (country-level only — NOT available at district level)
+
+const BRAINTREE_GEO = "1820328091";
+
+// GB-level geography code for NM_127_1
+const GB_GEO = "2092957699";
+
+interface UnemploymentObs {
+  item: { value: number; description: string };
+  obs_value: { value: number | string; description: string };
+  time: { value: string; description: string };
+  unit: { description: string };
+}
+
+interface UnemploymentResponse {
+  obs?: UnemploymentObs[];
+  error?: string;
+}
+
+interface ClaimantObs {
+  obs_value: { value: number | string; description: string };
+  time: { value: string; description: string };
+  date?: { description: string };
+}
+
+interface ClaimantDataResponse {
+  obs?: ClaimantObs[];
+  error?: string;
+}
+
+export async function GET() {
+  try {
+    // Fetch unemployment estimates, claimant count, and GB comparison in parallel
+    const [unemploymentRes, claimantRes, gbUnemploymentRes] = await Promise.all([
+      // NM_127_1: Model-based unemployment estimates for Braintree
+      // item=1 (count), item=2 (rate)
+      fetch(
+        `https://www.nomisweb.co.uk/api/v01/dataset/NM_127_1.data.json?geography=${BRAINTREE_GEO}&date=latest&measures=20100`,
+        { next: { revalidate: 86400 } }
+      ),
+      // NM_162_1: Claimant count (JSA + UC)
+      // gender=0 (all), age=0 (all ages), measure=1 (count)
+      // Use latestMINUS2 because the most recent month is often provisional/empty
+      fetch(
+        `https://www.nomisweb.co.uk/api/v01/dataset/NM_162_1.data.json?geography=${BRAINTREE_GEO}&date=latestMINUS2&gender=0&age=0&measure=1&measures=20100`,
+        { next: { revalidate: 86400 } }
+      ),
+      // GB-level unemployment for comparison
+      fetch(
+        `https://www.nomisweb.co.uk/api/v01/dataset/NM_127_1.data.json?geography=${GB_GEO}&date=latest&measures=20100`,
+        { next: { revalidate: 86400 } }
+      ),
+    ]);
+
+    // Parse unemployment estimates
+    const indicators: {
+      name: string;
+      value: number;
+      unit: string;
+      gbAvg: number | null;
+      period: string;
+    }[] = [];
+
+    let gbUnemploymentRate: number | null = null;
+
+    // Parse GB-level unemployment rate for comparison
+    if (gbUnemploymentRes.ok) {
+      const gbData: UnemploymentResponse = await gbUnemploymentRes.json();
+      if (gbData.obs && Array.isArray(gbData.obs)) {
+        for (const obs of gbData.obs) {
+          // item 2 = unemployment rate
+          if (obs.item?.value === 2) {
+            const val = typeof obs.obs_value?.value === "number" ? obs.obs_value.value : parseFloat(String(obs.obs_value?.value));
+            if (!isNaN(val)) gbUnemploymentRate = val;
+          }
+        }
+      }
+    }
+
+    if (unemploymentRes.ok) {
+      const data: UnemploymentResponse = await unemploymentRes.json();
+      if (data.obs && Array.isArray(data.obs)) {
+        for (const obs of data.obs) {
+          const rawValue = obs.obs_value?.value;
+          const value = typeof rawValue === "number" ? rawValue : parseFloat(String(rawValue));
+          const period = obs.time?.description || "latest";
+
+          if (isNaN(value)) continue;
+
+          // Only include the unemployment rate, not the raw count
+          if (obs.item?.value === 2) {
+            indicators.push({
+              name: "Unemployment rate (model-based)",
+              value,
+              unit: "%",
+              gbAvg: gbUnemploymentRate,
+              period,
+            });
+          }
+        }
+      }
+    }
+
+    // Parse claimant count
+    let claimantCount: {
+      rate: number | null;
+      count: number | null;
+      trend: string;
+      period: string;
+    } = { rate: null, count: null, trend: "stable", period: "latest" };
+
+    if (claimantRes.ok) {
+      const claimantData: ClaimantDataResponse = await claimantRes.json();
+      if (claimantData.obs && Array.isArray(claimantData.obs)) {
+        const obs = claimantData.obs[0];
+        if (obs) {
+          const rawValue = obs.obs_value?.value;
+          const count = typeof rawValue === "number" ? rawValue : parseFloat(String(rawValue));
+          claimantCount = {
+            rate: null, // Rate not reliably available from NOMIS for districts
+            count: isNaN(count) ? null : count,
+            trend: "stable",
+            period: obs.time?.description || obs.date?.description || "latest",
+          };
+        }
+      }
+    }
+
+    // Fetch previous year claimant count for trend
+    try {
+      const prevRes = await fetch(
+        `https://www.nomisweb.co.uk/api/v01/dataset/NM_162_1.data.json?geography=${BRAINTREE_GEO}&date=latestMINUS14&gender=0&age=0&measure=1&measures=20100`,
+        { next: { revalidate: 86400 } }
+      );
+      if (prevRes.ok) {
+        const prevData: ClaimantDataResponse = await prevRes.json();
+        if (prevData.obs?.[0] && claimantCount.count != null) {
+          const rawPrev = prevData.obs[0].obs_value?.value;
+          const prevCount = typeof rawPrev === "number" ? rawPrev : parseFloat(String(rawPrev));
+          if (!isNaN(prevCount) && prevCount > 0) {
+            const changePercent = ((claimantCount.count - prevCount) / prevCount) * 100;
+            if (changePercent > 5) claimantCount.trend = "rising";
+            else if (changePercent < -5) claimantCount.trend = "falling";
+            else claimantCount.trend = "stable";
+          }
+        }
+      }
+    } catch {
+      // Non-critical
+    }
+
+    return NextResponse.json({
+      indicators,
+      claimantCount,
+      source: "NOMIS/ONS",
+      sourceUrl: "https://www.nomisweb.co.uk/",
+    });
+  } catch {
+    return NextResponse.json(
+      { indicators: [], claimantCount: null, error: "Failed to fetch employment data" },
+      { status: 500 }
+    );
+  }
+}
