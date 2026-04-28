@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
+import { doc, getDoc, setDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 
-// Force dynamic — fetches live external data
 export const dynamic = "force-dynamic";
 
 // NOMIS (ONS) Labour Market Statistics — free, no auth required
@@ -9,6 +10,9 @@ export const dynamic = "force-dynamic";
 // NM_127_1: Model-based unemployment estimates (available at district level)
 // NM_162_1: Claimant count (JSA + UC) (available at district level)
 // NM_17_5: Annual Population Survey (country-level only — NOT available at district level)
+
+const TTL_MS = 24 * 60 * 60 * 1000;
+const cacheDoc = doc(db, "employment_cache", "braintree");
 
 const BRAINTREE_GEO = "1820328091";
 
@@ -38,7 +42,25 @@ interface ClaimantDataResponse {
   error?: string;
 }
 
-export async function GET() {
+interface EmploymentData {
+  indicators: {
+    name: string;
+    value: number;
+    unit: string;
+    gbAvg: number | null;
+    period: string;
+  }[];
+  claimantCount: {
+    rate: number | null;
+    count: number | null;
+    trend: string;
+    period: string;
+  };
+  source: string;
+  sourceUrl: string;
+}
+
+async function generateFreshData(): Promise<EmploymentData | null> {
   try {
     // Fetch unemployment estimates, claimant count, and GB comparison in parallel
     const [unemploymentRes, claimantRes, gbUnemploymentRes] = await Promise.all([
@@ -159,12 +181,66 @@ export async function GET() {
       // Non-critical
     }
 
-    return NextResponse.json({
+    return {
       indicators,
       claimantCount,
       source: "NOMIS/ONS",
       sourceUrl: "https://www.nomisweb.co.uk/",
+    };
+  } catch (err) {
+    console.error("Employment data fetch failed:", err);
+    return null;
+  }
+}
+
+async function fetchAndUpdateCache() {
+  try {
+    const fresh = await generateFreshData();
+    if (!fresh) return;
+
+    const existing = await getDoc(cacheDoc);
+    const existingData = existing.exists() ? existing.data().data : null;
+
+    if (existingData && JSON.stringify(existingData) === JSON.stringify(fresh)) {
+      return;
+    }
+
+    await setDoc(cacheDoc, {
+      data: fresh,
+      updated_at: new Date().toISOString(),
     });
+  } catch (err) {
+    console.error("Background employment cache update failed:", err);
+  }
+}
+
+export async function GET() {
+  try {
+    const snap = await getDoc(cacheDoc);
+    const cached = snap.exists() ? snap.data() : null;
+
+    if (cached) {
+      const ageMs = Date.now() - new Date(cached.updated_at).getTime();
+      if (ageMs > TTL_MS) {
+        fetchAndUpdateCache();
+      }
+      return NextResponse.json({ ...cached.data, source: "cache" });
+    }
+
+    const fresh = await generateFreshData();
+    if (!fresh) {
+      return NextResponse.json(
+        { indicators: [], claimantCount: null, error: "Failed to fetch employment data" },
+        { status: 500 }
+      );
+    }
+
+    await setDoc(cacheDoc, {
+      data: fresh,
+      updated_at: new Date().toISOString(),
+    });
+
+    return NextResponse.json(fresh);
   } catch {
     return NextResponse.json(
       { indicators: [], claimantCount: null, error: "Failed to fetch employment data" },

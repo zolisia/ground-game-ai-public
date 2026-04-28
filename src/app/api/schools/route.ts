@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 import { isInsideConstituency } from "@/lib/geo";
+import { db } from "@/lib/firebase";
 
-// Force dynamic — fetches live external data
 export const dynamic = "force-dynamic";
 
 // DfE Get Information About Schools (GIAS) — schools in/near Braintree constituency
 // Primary API: GIAS search by location
 // Fallback: static data for key schools in the constituency
+
+const TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const cacheDoc = doc(db, "schools_cache", "braintree");
 
 interface GIASSchool {
   URN: number;
@@ -34,6 +38,12 @@ interface School {
   pupils: number;
   address: string;
   urn: number;
+}
+
+interface SchoolsData {
+  schools: School[];
+  summary: ReturnType<typeof buildSummary>;
+  source: string;
 }
 
 function classifyPhase(phase: string, typeName: string): School["type"] {
@@ -81,7 +91,7 @@ const FALLBACK_SCHOOLS: School[] = [
   { name: "Great Saling Primary School", type: "Primary", ofstedRating: "Good", lat: 51.8876, lng: 0.4577, ageRange: "4-11", pupils: 98, address: "The Street, Great Saling CM7 4RB", urn: 114919 },
 ];
 
-export async function GET() {
+async function generateFreshData(): Promise<SchoolsData> {
   try {
     // Attempt GIAS API call
     const apiUrl =
@@ -125,13 +135,62 @@ export async function GET() {
 
     if (schools.length < 5) throw new Error("Too few results, using fallback");
 
-    return NextResponse.json({
+    return {
       schools,
       summary: buildSummary(schools),
       source: "gias",
-    });
+    };
   } catch {
-    // Fallback to static data
+    return {
+      schools: FALLBACK_SCHOOLS,
+      summary: buildSummary(FALLBACK_SCHOOLS),
+      source: "fallback",
+    };
+  }
+}
+
+async function fetchAndUpdateCache() {
+  try {
+    const fresh = await generateFreshData();
+
+    const existing = await getDoc(cacheDoc);
+    const existingData = existing.exists() ? existing.data().data : null;
+
+    if (existingData && JSON.stringify(existingData) === JSON.stringify(fresh)) {
+      return;
+    }
+
+    await setDoc(cacheDoc, {
+      data: fresh,
+      updated_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("Background schools cache update failed:", err);
+  }
+}
+
+export async function GET() {
+  try {
+    const snap = await getDoc(cacheDoc);
+    const cached = snap.exists() ? snap.data() : null;
+
+    if (cached) {
+      const ageMs = Date.now() - new Date(cached.updated_at).getTime();
+      if (ageMs > TTL_MS) {
+        fetchAndUpdateCache();
+      }
+      return NextResponse.json({ ...cached.data, source: "cache" });
+    }
+
+    const fresh = await generateFreshData();
+
+    await setDoc(cacheDoc, {
+      data: fresh,
+      updated_at: new Date().toISOString(),
+    });
+
+    return NextResponse.json(fresh);
+  } catch {
     return NextResponse.json({
       schools: FALLBACK_SCHOOLS,
       summary: buildSummary(FALLBACK_SCHOOLS),

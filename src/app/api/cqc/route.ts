@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
+import { doc, getDoc, setDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 
-// Force dynamic — fetches live external data
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 // Care Quality Commission (CQC) Public API — no auth required
 // Docs: https://api.cqc.org.uk/public/v1
 // partnerCode is an optional identifier for tracking
+
+const TTL_MS = 24 * 60 * 60 * 1000;
+const cacheDoc = doc(db, "cqc_cache", "braintree");
 
 const CQC_BASE = "https://api.cqc.org.uk/public/v1";
 const PARTNER_CODE = "GroundGame";
@@ -51,6 +55,16 @@ interface LocationResult {
   cqcUrl: string;
 }
 
+interface CQCData {
+  locations: LocationResult[];
+  summary: { outstanding: number; good: number; requiresImprovement: number; inadequate: number };
+  totalFound: number;
+  detailsFetched: number;
+  source: string;
+  sourceUrl: string;
+  note?: string;
+}
+
 async function fetchLocationsForPostcode(postcode: string): Promise<CQCLocationSummary[]> {
   try {
     const res = await fetch(
@@ -78,7 +92,7 @@ async function fetchLocationDetail(locationId: string): Promise<CQCLocationDetai
   }
 }
 
-export async function GET() {
+async function generateFreshData(): Promise<CQCData> {
   try {
     // Fetch location lists for all postcodes in parallel
     const listResults = await Promise.allSettled(
@@ -141,17 +155,63 @@ export async function GET() {
 
     // If API returned no results (403 / blocked), use fallback
     if (locations.length === 0) {
-      return NextResponse.json(getFallbackData());
+      return getFallbackData();
     }
 
-    return NextResponse.json({
+    return {
       locations,
       summary: ratingCounts,
       totalFound: allLocations.length,
       detailsFetched: toFetch.length,
       source: "live",
       sourceUrl: "https://www.cqc.org.uk/",
+    };
+  } catch {
+    return getFallbackData();
+  }
+}
+
+async function fetchAndUpdateCache() {
+  try {
+    const fresh = await generateFreshData();
+
+    const existing = await getDoc(cacheDoc);
+    const existingData = existing.exists() ? existing.data().data : null;
+
+    if (existingData && JSON.stringify(existingData) === JSON.stringify(fresh)) {
+      return;
+    }
+
+    await setDoc(cacheDoc, {
+      data: fresh,
+      updated_at: new Date().toISOString(),
     });
+  } catch (err) {
+    console.error("Background CQC cache update failed:", err);
+  }
+}
+
+export async function GET() {
+  try {
+    const snap = await getDoc(cacheDoc);
+    const cached = snap.exists() ? snap.data() : null;
+
+    if (cached) {
+      const ageMs = Date.now() - new Date(cached.updated_at).getTime();
+      if (ageMs > TTL_MS) {
+        fetchAndUpdateCache();
+      }
+      return NextResponse.json({ ...cached.data, source: "cache" });
+    }
+
+    const fresh = await generateFreshData();
+
+    await setDoc(cacheDoc, {
+      data: fresh,
+      updated_at: new Date().toISOString(),
+    });
+
+    return NextResponse.json(fresh);
   } catch {
     return NextResponse.json(getFallbackData());
   }
@@ -163,7 +223,7 @@ function cqcSearch(name: string): string {
   return `https://www.google.com/search?q=${encodeURIComponent(name + " CQC inspection report")}`;
 }
 
-function getFallbackData() {
+function getFallbackData(): CQCData {
   const locations: LocationResult[] = [
     { name: "Braintree Community Hospital", type: "Hospital", rating: "Good", lastInspection: "2024-06-15", beds: 30, postcode: "CM7 1TG", reportUrl: null, cqcUrl: cqcSearch("Braintree Community Hospital") },
     { name: "Highwood House Care Home", type: "Care home", rating: "Good", lastInspection: "2024-03-22", beds: 40, postcode: "CM7 5LJ", reportUrl: null, cqcUrl: cqcSearch("Highwood House") },

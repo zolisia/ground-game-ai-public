@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
+import { doc, getDoc, setDoc, type DocumentReference } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 
-// Force dynamic — fetches live external data
 export const dynamic = "force-dynamic";
 
 // ONS Census 2021 API — free, no auth required
 // https://api.beta.ons.gov.uk/v1
 // Fetches ward-level census data for all wards in the Braintree constituency
+
+const TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 const ONS_API = "https://api.beta.ons.gov.uk/v1/population-types";
 
@@ -151,26 +154,28 @@ interface ONSResponse {
   total_observations: number;
 }
 
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const topicId = searchParams.get("topic") || "age-under16";
+interface WardData {
+  wardCode: string;
+  wardName: string;
+  value: number;
+  total: number;
+  primaryCount: number;
+  breakdown?: Record<string, number>;
+}
 
-  // If requesting the list of available topics
-  if (topicId === "list") {
-    return NextResponse.json({
-      topics: TOPICS.map(t => ({
-        id: t.id,
-        label: t.label,
-        primaryLabel: t.primaryLabel,
-      })),
-    });
-  }
+interface CensusData {
+  topic: { id: string; label: string; primaryLabel: string };
+  wards: WardData[];
+  summary: {
+    totalPopulation: number;
+    constituencyAverage: number;
+    highestWard: WardData;
+    lowestWard: WardData;
+  };
+  source: string;
+}
 
-  const topic = TOPICS.find(t => t.id === topicId);
-  if (!topic) {
-    return NextResponse.json({ error: "Unknown topic" }, { status: 400 });
-  }
-
+async function generateFreshData(topic: CensusTopic): Promise<CensusData | null> {
   try {
     // Fetch data for all wards in parallel
     // ONS API supports querying one ward at a time
@@ -186,16 +191,6 @@ export async function GET(request: Request) {
         return { wardCode, observations: data.observations };
       })
     );
-
-    // Process results into ward-level percentages
-    interface WardData {
-      wardCode: string;
-      wardName: string;
-      value: number; // percentage for choropleth
-      total: number;
-      primaryCount: number;
-      breakdown?: Record<string, number>;
-    }
 
     const wardData: WardData[] = [];
 
@@ -221,22 +216,22 @@ export async function GET(request: Request) {
         breakdown[valueDim.option] = obs.observation;
 
         // Handle inverted topics (where we want 100% - primaryCategory%)
-        if (topicId === "ethnicity" || topicId === "country-born-uk") {
+        if (topic.id === "ethnicity" || topic.id === "country-born-uk") {
           // For these, primaryCategory is the majority — we want the inverse
           if (valueDim.option_id !== topic.primaryCategory) {
             primaryCount += obs.observation;
           }
-        } else if (topicId === "health-bad") {
+        } else if (topic.id === "health-bad") {
           // Combine "Bad" and "Very bad" health
           if (valueDim.option_id === "4" || valueDim.option_id === "5") {
             primaryCount += obs.observation;
           }
-        } else if (topicId === "tenure-owned") {
+        } else if (topic.id === "tenure-owned") {
           // Combine "Owned outright" and "Owned with mortgage"
           if (valueDim.option_id === "1" || valueDim.option_id === "2") {
             primaryCount += obs.observation;
           }
-        } else if (topicId === "deprivation") {
+        } else if (topic.id === "deprivation") {
           // Combine "Deprived in 3" and "Deprived in 4" dimensions
           if (valueDim.option_id === "4" || valueDim.option_id === "5") {
             primaryCount += obs.observation;
@@ -265,7 +260,7 @@ export async function GET(request: Request) {
     const totalPrimary = wardData.reduce((sum, w) => sum + w.primaryCount, 0);
     const avgPercentage = totalPop > 0 ? Math.round((totalPrimary / totalPop) * 1000) / 10 : 0;
 
-    return NextResponse.json({
+    return {
       topic: {
         id: topic.id,
         label: topic.label,
@@ -279,9 +274,84 @@ export async function GET(request: Request) {
         lowestWard: wardData.reduce((min, w) => w.value < min.value ? w : min, wardData[0]),
       },
       source: "ONS Census 2021",
-    });
+    };
   } catch (err) {
     console.error("Census API error:", err);
+    return null;
+  }
+}
+
+async function fetchAndUpdateCache(topic: CensusTopic, cacheDocRef: DocumentReference) {
+  try {
+    const fresh = await generateFreshData(topic);
+    if (!fresh) return;
+
+    const existing = await getDoc(cacheDocRef);
+    const existingData = existing.exists() ? existing.data().data : null;
+
+    if (existingData && JSON.stringify(existingData) === JSON.stringify(fresh)) {
+      return;
+    }
+
+    await setDoc(cacheDocRef, {
+      data: fresh,
+      updated_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("Background census cache update failed:", err);
+  }
+}
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const topicId = searchParams.get("topic") || "age-under16";
+
+  // If requesting the list of available topics
+  if (topicId === "list") {
+    return NextResponse.json({
+      topics: TOPICS.map(t => ({
+        id: t.id,
+        label: t.label,
+        primaryLabel: t.primaryLabel,
+      })),
+    });
+  }
+
+  const topic = TOPICS.find(t => t.id === topicId);
+  if (!topic) {
+    return NextResponse.json({ error: "Unknown topic" }, { status: 400 });
+  }
+
+  // One cache doc per topic so different choropleth selections don't overwrite each other
+  const cacheDocRef = doc(db, "census_cache", `braintree-${topicId}`);
+
+  try {
+    const snap = await getDoc(cacheDocRef);
+    const cached = snap.exists() ? snap.data() : null;
+
+    if (cached) {
+      const ageMs = Date.now() - new Date(cached.updated_at).getTime();
+      if (ageMs > TTL_MS) {
+        fetchAndUpdateCache(topic, cacheDocRef);
+      }
+      return NextResponse.json({ ...cached.data, source: "cache" });
+    }
+
+    const fresh = await generateFreshData(topic);
+    if (!fresh) {
+      return NextResponse.json(
+        { error: "Failed to fetch census data" },
+        { status: 500 }
+      );
+    }
+
+    await setDoc(cacheDocRef, {
+      data: fresh,
+      updated_at: new Date().toISOString(),
+    });
+
+    return NextResponse.json(fresh);
+  } catch {
     return NextResponse.json(
       { error: "Failed to fetch census data" },
       { status: 500 }

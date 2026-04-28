@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 import { isInsideConstituency } from "@/lib/geo";
+import { db } from "@/lib/firebase";
 
-// Force dynamic — fetches live external data
 export const dynamic = "force-dynamic";
 
 // FixMyStreet API for Braintree constituency area
 // Uses the /around endpoint with bounding box covering the constituency
+
+const TTL_MS = 30 * 60 * 1000;
+const cacheDoc = doc(db, "fixmystreet_cache", "braintree");
 
 interface FMSPin {
   0: number; // lat
@@ -17,7 +21,23 @@ interface FMSPin {
   6: boolean;
 }
 
-export async function GET() {
+interface FixMyStreetIssue {
+  id: string;
+  title: string;
+  category: string;
+  state: string;
+  created: string;
+  latitude: number;
+  longitude: number;
+  url: string;
+}
+
+interface FixMyStreetData {
+  issues: FixMyStreetIssue[];
+  total?: number;
+}
+
+async function generateFreshData(): Promise<FixMyStreetData | null> {
   try {
     // Split constituency into quadrant zones for full coverage
     // Actual GeoJSON extent: lng 0.308–0.782, lat 51.829–52.087
@@ -69,13 +89,13 @@ export async function GET() {
     }
 
     if (allPins.length === 0) {
-      return NextResponse.json({ issues: [] });
+      return { issues: [] };
     }
 
     // Filter to constituency boundary
     const filteredPins = allPins.filter((pin) => isInsideConstituency(pin[1], pin[0]));
 
-    const issues = filteredPins.slice(0, 60).map((pin: FMSPin) => ({
+    const issues: FixMyStreetIssue[] = filteredPins.slice(0, 60).map((pin: FMSPin) => ({
       id: String(pin[3]),
       title: pin[4] || "Reported issue",
       category: categoriseFromTitle(pin[4] || ""),
@@ -86,7 +106,58 @@ export async function GET() {
       url: `https://www.fixmystreet.com/report/${pin[3]}`,
     }));
 
-    return NextResponse.json({ issues, total: filteredPins.length });
+    return { issues, total: filteredPins.length };
+  } catch (err) {
+    console.error("FixMyStreet data fetch failed:", err);
+    return null;
+  }
+}
+
+async function fetchAndUpdateCache() {
+  try {
+    const fresh = await generateFreshData();
+    if (!fresh) return;
+
+    const existing = await getDoc(cacheDoc);
+    const existingData = existing.exists() ? existing.data().data : null;
+
+    if (existingData && JSON.stringify(existingData) === JSON.stringify(fresh)) {
+      return;
+    }
+
+    await setDoc(cacheDoc, {
+      data: fresh,
+      updated_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("Background fixmystreet cache update failed:", err);
+  }
+}
+
+export async function GET() {
+  try {
+    const snap = await getDoc(cacheDoc);
+    const cached = snap.exists() ? snap.data() : null;
+
+    if (cached) {
+      const ageMs = Date.now() - new Date(cached.updated_at).getTime();
+      if (ageMs > TTL_MS) {
+        fetchAndUpdateCache();
+      }
+      return NextResponse.json({ ...cached.data, source: "cache" });
+    }
+
+    const fresh = await generateFreshData();
+    if (!fresh) {
+      return NextResponse.json({ issues: [] });
+    }
+
+    await setDoc(cacheDoc, {
+      data: fresh,
+      updated_at: new Date().toISOString(),
+    });
+
+    return NextResponse.json(fresh);
   } catch {
     return NextResponse.json({ issues: [] });
   }

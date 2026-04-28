@@ -1,13 +1,17 @@
 import { NextResponse } from "next/server";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 import { isInsideConstituency } from "@/lib/geo";
+import { db } from "@/lib/firebase";
 
-// Force dynamic — fetches live external data
 export const dynamic = "force-dynamic";
 
 // UK Police API — free, no auth required
 // Docs: https://data.police.uk/docs/
 // Uses multiple sample points across Braintree constituency for full coverage
 // IMPORTANT: API rate-limits at ~15 concurrent requests, so we batch in groups
+
+const TTL_MS = 15 * 60 * 1000;
+const cacheDoc = doc(db, "crime_cache", "braintree");
 
 interface CrimeRecord {
   category: string;
@@ -19,6 +23,22 @@ interface CrimeRecord {
   month: string;
   outcome_status: { category: string } | null;
   persistent_id?: string;
+}
+
+interface CrimeData {
+  crimes: Array<{
+    category: string;
+    lat: number;
+    lng: number;
+    street: string;
+    month: string;
+    outcome: string | null;
+  }>;
+  summary: Array<{ category: string; count: number }>;
+  total: number;
+  month: string;
+  source: string;
+  sourceUrl: string;
 }
 
 // Grid of points covering the FULL Braintree Parliamentary Constituency
@@ -96,7 +116,14 @@ async function fetchPoint(lat: number, lng: number, dateStr: string, retries = 2
   return [];
 }
 
-export async function GET() {
+function formatCategory(cat: string): string {
+  return cat
+    .split("-")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
+async function generateFreshData(): Promise<CrimeData | null> {
   try {
     // Get latest available month (usually 2 months behind)
     const now = new Date();
@@ -160,22 +187,66 @@ export async function GET() {
       .sort((a, b) => b[1] - a[1])
       .map(([category, count]) => ({ category, count }));
 
-    return NextResponse.json({
+    return {
       crimes,
       summary,
       total: filteredCrimes.length,
       month: dateStr,
       source: "data.police.uk",
       sourceUrl: "https://data.police.uk/",
-    });
-  } catch {
-    return NextResponse.json({ crimes: [], error: "Failed to fetch" }, { status: 500 });
+    };
+  } catch (err) {
+    console.error("Crime data fetch failed:", err);
+    return null;
   }
 }
 
-function formatCategory(cat: string): string {
-  return cat
-    .split("-")
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
+async function fetchAndUpdateCache() {
+  try {
+    const fresh = await generateFreshData();
+    if (!fresh) return;
+
+    const existing = await getDoc(cacheDoc);
+    const existingData = existing.exists() ? existing.data().data : null;
+
+    if (existingData && JSON.stringify(existingData) === JSON.stringify(fresh)) {
+      return;
+    }
+
+    await setDoc(cacheDoc, {
+      data: fresh,
+      updated_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("Background crime cache update failed:", err);
+  }
+}
+
+export async function GET() {
+  try {
+    const snap = await getDoc(cacheDoc);
+    const cached = snap.exists() ? snap.data() : null;
+
+    if (cached) {
+      const ageMs = Date.now() - new Date(cached.updated_at).getTime();
+      if (ageMs > TTL_MS) {
+        fetchAndUpdateCache();
+      }
+      return NextResponse.json({ ...cached.data, source: "cache" });
+    }
+
+    const fresh = await generateFreshData();
+    if (!fresh) {
+      return NextResponse.json({ crimes: [], error: "Failed to fetch" }, { status: 500 });
+    }
+
+    await setDoc(cacheDoc, {
+      data: fresh,
+      updated_at: new Date().toISOString(),
+    });
+
+    return NextResponse.json(fresh);
+  } catch {
+    return NextResponse.json({ crimes: [], error: "Failed to fetch" }, { status: 500 });
+  }
 }

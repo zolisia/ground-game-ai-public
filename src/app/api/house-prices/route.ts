@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
+import { doc, getDoc, setDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 
-// Force dynamic — fetches live external data
 export const dynamic = "force-dynamic";
 
 // HM Land Registry — Open Government Licence, no auth required
 // UK House Price Index: https://landregistry.data.gov.uk/
 // Price Paid Data: https://landregistry.data.gov.uk/data/ppi
+
+const TTL_MS = 24 * 60 * 60 * 1000;
+const cacheDoc = doc(db, "house_prices_cache", "braintree");
 
 interface UKHPIItem {
   period: string;
@@ -34,7 +38,14 @@ interface TransactionRecord {
   transactionCategory?: string;
 }
 
-export async function GET() {
+interface HousePricesData {
+  index: { items: UKHPIItem[] };
+  recentSales: Record<string, unknown>[];
+  source: string;
+  sourceUrl: string;
+}
+
+async function generateFreshData(): Promise<HousePricesData | null> {
   try {
     const [indexRes, salesRes] = await Promise.allSettled([
       fetch(
@@ -121,12 +132,66 @@ export async function GET() {
       });
     }
 
-    return NextResponse.json({
+    return {
       index: { items: indexItems },
       recentSales,
       source: "live",
       sourceUrl: "https://landregistry.data.gov.uk/",
+    };
+  } catch (err) {
+    console.error("House prices data fetch failed:", err);
+    return null;
+  }
+}
+
+async function fetchAndUpdateCache() {
+  try {
+    const fresh = await generateFreshData();
+    if (!fresh) return;
+
+    const existing = await getDoc(cacheDoc);
+    const existingData = existing.exists() ? existing.data().data : null;
+
+    if (existingData && JSON.stringify(existingData) === JSON.stringify(fresh)) {
+      return;
+    }
+
+    await setDoc(cacheDoc, {
+      data: fresh,
+      updated_at: new Date().toISOString(),
     });
+  } catch (err) {
+    console.error("Background house prices cache update failed:", err);
+  }
+}
+
+export async function GET() {
+  try {
+    const snap = await getDoc(cacheDoc);
+    const cached = snap.exists() ? snap.data() : null;
+
+    if (cached) {
+      const ageMs = Date.now() - new Date(cached.updated_at).getTime();
+      if (ageMs > TTL_MS) {
+        fetchAndUpdateCache();
+      }
+      return NextResponse.json({ ...cached.data, source: "cache" });
+    }
+
+    const fresh = await generateFreshData();
+    if (!fresh) {
+      return NextResponse.json(
+        { index: { items: [] }, recentSales: [], error: "Failed to fetch house price data" },
+        { status: 500 }
+      );
+    }
+
+    await setDoc(cacheDoc, {
+      data: fresh,
+      updated_at: new Date().toISOString(),
+    });
+
+    return NextResponse.json(fresh);
   } catch {
     return NextResponse.json(
       { index: { items: [] }, recentSales: [], error: "Failed to fetch house price data" },

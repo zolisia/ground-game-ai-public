@@ -1,11 +1,16 @@
 import { NextResponse } from "next/server";
+import { doc, getDoc, setDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 
-// Force dynamic — fetches live external data
 export const dynamic = "force-dynamic";
 
 // Nomis / ONS Claimant Count — free, no auth required
 // Dataset NM_162_1: Claimant count by constituency
 // NOMIS geography code 721420347 = Braintree (wpca24 constituency type)
+
+const TTL_MS = 24 * 60 * 60 * 1000;
+const cacheDoc = doc(db, "universal_credit_cache", "braintree");
+
 const CONSTITUENCY_CODE = "721420347";
 const BASE_URL = "https://www.nomisweb.co.uk/api/v01/dataset/NM_162_1.data.json";
 
@@ -22,6 +27,14 @@ interface NomisObs {
   age: NomisNestedField;
   unit: NomisNestedField;
   obs_status: NomisNestedField;
+}
+
+interface UniversalCreditData {
+  current: { count: number | null; rate: number | null; date: string | null };
+  trend: { date: string; count: number }[];
+  byAge: { label: string; count: number; percentage: number }[];
+  source: string;
+  sourceUrl: string;
 }
 
 function getVal(field: NomisNestedField | undefined): number {
@@ -50,7 +63,7 @@ function buildMonthRange(n: number): string {
   return months.join(",");
 }
 
-export async function GET() {
+async function generateFreshData(): Promise<UniversalCreditData | null> {
   try {
     const timeRange = buildMonthRange(12);
 
@@ -153,15 +166,68 @@ export async function GET() {
       }
     }
 
-    return NextResponse.json({
+    return {
       current,
       trend,
       byAge,
       source: current.count !== null ? "live" : "empty",
       sourceUrl: "https://www.nomisweb.co.uk/",
-    });
+    };
   } catch (err) {
     console.error("Universal Credit API error:", err);
+    return null;
+  }
+}
+
+async function fetchAndUpdateCache() {
+  try {
+    const fresh = await generateFreshData();
+    if (!fresh) return;
+
+    const existing = await getDoc(cacheDoc);
+    const existingData = existing.exists() ? existing.data().data : null;
+
+    if (existingData && JSON.stringify(existingData) === JSON.stringify(fresh)) {
+      return;
+    }
+
+    await setDoc(cacheDoc, {
+      data: fresh,
+      updated_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("Background universal credit cache update failed:", err);
+  }
+}
+
+export async function GET() {
+  try {
+    const snap = await getDoc(cacheDoc);
+    const cached = snap.exists() ? snap.data() : null;
+
+    if (cached) {
+      const ageMs = Date.now() - new Date(cached.updated_at).getTime();
+      if (ageMs > TTL_MS) {
+        fetchAndUpdateCache();
+      }
+      return NextResponse.json({ ...cached.data, source: "cache" });
+    }
+
+    const fresh = await generateFreshData();
+    if (!fresh) {
+      return NextResponse.json(
+        { current: null, trend: [], byAge: [], error: "Failed to fetch claimant count data" },
+        { status: 500 }
+      );
+    }
+
+    await setDoc(cacheDoc, {
+      data: fresh,
+      updated_at: new Date().toISOString(),
+    });
+
+    return NextResponse.json(fresh);
+  } catch {
     return NextResponse.json(
       { current: null, trend: [], byAge: [], error: "Failed to fetch claimant count data" },
       { status: 500 }

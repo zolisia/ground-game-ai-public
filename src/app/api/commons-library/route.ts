@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
+import { doc, getDoc, setDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 
-// Force dynamic — fetches live external data
 export const dynamic = "force-dynamic";
 export const maxDuration = 15;
 
@@ -8,6 +9,9 @@ export const maxDuration = 15;
 // Since commonslibrary.parliament.uk blocks server-side scraping (403),
 // we use the Commons Library data dashboard CSV downloads + NOMIS report data
 // to build a comprehensive profile.
+
+const TTL_MS = 24 * 60 * 60 * 1000;
+const cacheDoc = doc(db, "commons_library_cache", "braintree");
 
 const CONSTITUENCY = "Braintree";
 const ONS_CODE = "E14001121";
@@ -18,6 +22,16 @@ const NOMIS_CODE = "721420347"; // NOMIS wpca24 code for Braintree
 interface DataSection {
   heading: string;
   rows: Record<string, string>[];
+}
+
+interface CommonsLibraryData {
+  constituency: string;
+  onsCode: string;
+  sections: Record<string, DataSection[]>;
+  sectionCount: number;
+  source: string;
+  sourceUrl: string;
+  scrapedAt: string;
 }
 
 async function fetchNomisReport(): Promise<DataSection[]> {
@@ -210,47 +224,89 @@ function getStaticProfile(): DataSection[] {
   ];
 }
 
+async function generateFreshData(): Promise<CommonsLibraryData> {
+  // Fetch live NOMIS + Parliament data in parallel
+  const [nomisSections, parliamentSections] = await Promise.allSettled([
+    fetchNomisReport(),
+    fetchParliamentData(),
+  ]);
+
+  const liveSections: DataSection[] = [];
+  if (nomisSections.status === "fulfilled") liveSections.push(...nomisSections.value);
+  if (parliamentSections.status === "fulfilled") liveSections.push(...parliamentSections.value);
+
+  // Combine live data with static profile
+  const staticSections = getStaticProfile();
+
+  // Group into categories
+  const grouped: Record<string, DataSection[]> = {};
+
+  // Add live data first (takes precedence in display)
+  for (const s of liveSections) {
+    const cat = "live";
+    if (!grouped[cat]) grouped[cat] = [];
+    grouped[cat].push(s);
+  }
+
+  // Add static profile sections
+  for (const s of staticSections) {
+    const cat = categorise(s.heading);
+    if (!grouped[cat]) grouped[cat] = [];
+    grouped[cat].push(s);
+  }
+
+  return {
+    constituency: CONSTITUENCY,
+    onsCode: ONS_CODE,
+    sections: grouped,
+    sectionCount: liveSections.length + staticSections.length,
+    source: liveSections.length > 0 ? "mixed" : "static",
+    sourceUrl: `https://commonslibrary.parliament.uk/constituency/${CONSTITUENCY.toLowerCase()}/`,
+    scrapedAt: new Date().toISOString(),
+  };
+}
+
+async function fetchAndUpdateCache() {
+  try {
+    const fresh = await generateFreshData();
+
+    const existing = await getDoc(cacheDoc);
+    const existingData = existing.exists() ? existing.data().data : null;
+
+    if (existingData && JSON.stringify(existingData) === JSON.stringify(fresh)) {
+      return;
+    }
+
+    await setDoc(cacheDoc, {
+      data: fresh,
+      updated_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("Background commons library cache update failed:", err);
+  }
+}
+
 export async function GET() {
   try {
-    // Fetch live NOMIS + Parliament data in parallel
-    const [nomisSections, parliamentSections] = await Promise.allSettled([
-      fetchNomisReport(),
-      fetchParliamentData(),
-    ]);
+    const snap = await getDoc(cacheDoc);
+    const cached = snap.exists() ? snap.data() : null;
 
-    const liveSections: DataSection[] = [];
-    if (nomisSections.status === "fulfilled") liveSections.push(...nomisSections.value);
-    if (parliamentSections.status === "fulfilled") liveSections.push(...parliamentSections.value);
-
-    // Combine live data with static profile
-    const staticSections = getStaticProfile();
-
-    // Group into categories
-    const grouped: Record<string, DataSection[]> = {};
-
-    // Add live data first (takes precedence in display)
-    for (const s of liveSections) {
-      const cat = "live";
-      if (!grouped[cat]) grouped[cat] = [];
-      grouped[cat].push(s);
+    if (cached) {
+      const ageMs = Date.now() - new Date(cached.updated_at).getTime();
+      if (ageMs > TTL_MS) {
+        fetchAndUpdateCache();
+      }
+      return NextResponse.json({ ...cached.data, source: "cache" });
     }
 
-    // Add static profile sections
-    for (const s of staticSections) {
-      const cat = categorise(s.heading);
-      if (!grouped[cat]) grouped[cat] = [];
-      grouped[cat].push(s);
-    }
+    const fresh = await generateFreshData();
 
-    return NextResponse.json({
-      constituency: CONSTITUENCY,
-      onsCode: ONS_CODE,
-      sections: grouped,
-      sectionCount: liveSections.length + staticSections.length,
-      source: liveSections.length > 0 ? "mixed" : "static",
-      sourceUrl: `https://commonslibrary.parliament.uk/constituency/${CONSTITUENCY.toLowerCase()}/`,
-      scrapedAt: new Date().toISOString(),
+    await setDoc(cacheDoc, {
+      data: fresh,
+      updated_at: new Date().toISOString(),
     });
+
+    return NextResponse.json(fresh);
   } catch (err) {
     console.error("Commons Library API error:", err);
     // Return static data as fallback

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
+import { doc, getDoc, setDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 
-// Force dynamic — fetches live external data
 export const dynamic = "force-dynamic";
 
 // PHE Fingertips API — free, no auth required
@@ -11,6 +12,9 @@ export const dynamic = "force-dynamic";
 // are intermittently returning 500 errors. The metadata endpoints (/area_types,
 // /available_data) still work. We try multiple API patterns and fall back to
 // cached static data when the API is unavailable.
+
+const TTL_MS = 24 * 60 * 60 * 1000;
+const cacheDoc = doc(db, "health_cache", "braintree");
 
 const FINGERTIPS_API = "https://fingertips.phe.org.uk/api";
 
@@ -58,6 +62,14 @@ interface HealthIndicator {
   englandAvg: number | null;
   significance: "better" | "similar" | "worse" | "unknown";
   period: string;
+}
+
+interface HealthData {
+  indicators: HealthIndicator[];
+  areaName: string;
+  areaCode: string;
+  source: string;
+  sourceUrl: string;
 }
 
 function getSignificance(
@@ -130,7 +142,7 @@ async function tryFingertipsFetch(): Promise<FingertipsDataPoint[] | null> {
   return null;
 }
 
-export async function GET() {
+async function generateFreshData(): Promise<HealthData> {
   try {
     const data = await tryFingertipsFetch();
 
@@ -149,26 +161,72 @@ export async function GET() {
       );
 
       if (indicators.length > 0) {
-        return NextResponse.json({
+        return {
           indicators,
           areaName: "Braintree",
           areaCode: BRAINTREE_DISTRICT,
           source: "PHE Fingertips",
           sourceUrl: "https://fingertips.phe.org.uk",
-        });
+        };
       }
     }
-
-    // API is unavailable or returned no usable data — use static fallback
-    return NextResponse.json({
-      indicators: FALLBACK_INDICATORS,
-      areaName: "Braintree",
-      areaCode: BRAINTREE_DISTRICT,
-      source: "PHE Fingertips (cached)",
-      sourceUrl: "https://fingertips.phe.org.uk",
-    });
   } catch (err) {
     console.error("Health API error:", err);
+  }
+
+  // API is unavailable or returned no usable data — use static fallback
+  return {
+    indicators: FALLBACK_INDICATORS,
+    areaName: "Braintree",
+    areaCode: BRAINTREE_DISTRICT,
+    source: "PHE Fingertips (cached)",
+    sourceUrl: "https://fingertips.phe.org.uk",
+  };
+}
+
+async function fetchAndUpdateCache() {
+  try {
+    const fresh = await generateFreshData();
+
+    const existing = await getDoc(cacheDoc);
+    const existingData = existing.exists() ? existing.data().data : null;
+
+    if (existingData && JSON.stringify(existingData) === JSON.stringify(fresh)) {
+      return;
+    }
+
+    await setDoc(cacheDoc, {
+      data: fresh,
+      updated_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("Background health cache update failed:", err);
+  }
+}
+
+export async function GET() {
+  try {
+    const snap = await getDoc(cacheDoc);
+    const cached = snap.exists() ? snap.data() : null;
+
+    if (cached) {
+      const ageMs = Date.now() - new Date(cached.updated_at).getTime();
+      if (ageMs > TTL_MS) {
+        fetchAndUpdateCache();
+      }
+      return NextResponse.json({ ...cached.data, source: "cache" });
+    }
+
+    const fresh = await generateFreshData();
+
+    await setDoc(cacheDoc, {
+      data: fresh,
+      updated_at: new Date().toISOString(),
+    });
+
+    return NextResponse.json(fresh);
+  } catch (err) {
+    console.error("Health route error:", err);
     return NextResponse.json({
       indicators: FALLBACK_INDICATORS,
       areaName: "Braintree",

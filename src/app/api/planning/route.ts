@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 import { isInsideConstituency } from "@/lib/geo";
+import { db } from "@/lib/firebase";
 
-// Force dynamic — fetches live external data
 export const dynamic = "force-dynamic";
 
 // PlanIt API for planning applications in the Braintree constituency area
@@ -11,6 +12,9 @@ export const dynamic = "force-dynamic";
 
 const PLANIT_URL =
   "https://www.planit.org.uk/api/applics/json?bbox=0.30,51.75,0.79,52.09&recent=60&limit=100";
+
+const TTL_MS = 60 * 60 * 1000;
+const cacheDoc = doc(db, "planning_cache", "braintree");
 
 interface PlanItRecord {
   uid?: string;
@@ -49,7 +53,12 @@ interface NormalisedApplication {
   local_authority: string;
 }
 
-export async function GET() {
+interface PlanningData {
+  applications: NormalisedApplication[];
+  total: number;
+}
+
+async function generateFreshData(): Promise<PlanningData | null> {
   try {
     const res = await fetch(PLANIT_URL, {
       next: { revalidate: 86400 },
@@ -60,14 +69,14 @@ export async function GET() {
     });
 
     if (!res.ok) {
-      return NextResponse.json({ applications: [], total: 0 });
+      return { applications: [], total: 0 };
     }
 
     const data: PlanItResponse = await res.json();
     const records = data.records || [];
 
     if (records.length === 0) {
-      return NextResponse.json({ applications: [], total: 0 });
+      return { applications: [], total: 0 };
     }
 
     const applications: NormalisedApplication[] = records
@@ -87,7 +96,58 @@ export async function GET() {
       .filter((app) => app.lat !== 0 && app.lng !== 0)
       .filter((app) => isInsideConstituency(app.lng, app.lat));
 
-    return NextResponse.json({ applications, total: applications.length });
+    return { applications, total: applications.length };
+  } catch (err) {
+    console.error("Planning data fetch failed:", err);
+    return null;
+  }
+}
+
+async function fetchAndUpdateCache() {
+  try {
+    const fresh = await generateFreshData();
+    if (!fresh) return;
+
+    const existing = await getDoc(cacheDoc);
+    const existingData = existing.exists() ? existing.data().data : null;
+
+    if (existingData && JSON.stringify(existingData) === JSON.stringify(fresh)) {
+      return;
+    }
+
+    await setDoc(cacheDoc, {
+      data: fresh,
+      updated_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("Background planning cache update failed:", err);
+  }
+}
+
+export async function GET() {
+  try {
+    const snap = await getDoc(cacheDoc);
+    const cached = snap.exists() ? snap.data() : null;
+
+    if (cached) {
+      const ageMs = Date.now() - new Date(cached.updated_at).getTime();
+      if (ageMs > TTL_MS) {
+        fetchAndUpdateCache();
+      }
+      return NextResponse.json({ ...cached.data, source: "cache" });
+    }
+
+    const fresh = await generateFreshData();
+    if (!fresh) {
+      return NextResponse.json({ applications: [], total: 0 });
+    }
+
+    await setDoc(cacheDoc, {
+      data: fresh,
+      updated_at: new Date().toISOString(),
+    });
+
+    return NextResponse.json(fresh);
   } catch {
     return NextResponse.json({ applications: [], total: 0 });
   }

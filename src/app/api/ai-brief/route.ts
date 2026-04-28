@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
+import { doc, getDoc, setDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 
-// Force dynamic — needs runtime env vars (ANTHROPIC_API_KEY) and fresh data each request
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
+
+const TTL_MS = 30 * 60 * 1000;
+
+const cacheDoc = doc(db, "ai_brief_cache", "braintree");
 
 const PLACEHOLDER_BRIEF = `# Constituency Intelligence Brief — Braintree
 
@@ -31,6 +36,13 @@ interface DataSources {
   crime: unknown;
   parliament: unknown;
   fixmystreet: unknown;
+}
+
+interface BriefData {
+  brief: string;
+  generated: string;
+  model?: string;
+  usage?: unknown;
 }
 
 async function fetchLocalData(baseUrl: string): Promise<DataSources> {
@@ -164,28 +176,11 @@ Note any emerging issues that could escalate — things to watch in the next 24-
 Keep the tone professional and analytical. Be specific — reference actual data points. Do not invent or hallucinate information not present in the source data.`;
 }
 
-export async function GET(request: Request) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-
-  if (!apiKey) {
-    return NextResponse.json(
-      { brief: PLACEHOLDER_BRIEF, generated: new Date().toISOString(), cached: false },
-      { status: 200 }
-    );
-  }
-
+async function generateFreshBrief(baseUrl: string, apiKey: string): Promise<BriefData | null> {
   try {
-    // Derive base URL from the incoming request
-    const url = new URL(request.url);
-    const baseUrl = `${url.protocol}//${url.host}`;
-
-    // Fetch all local data sources in parallel
     const data = await fetchLocalData(baseUrl);
-
-    // Build the prompt
     const prompt = buildPrompt(data);
 
-    // Call Anthropic API directly via fetch
     const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -196,12 +191,7 @@ export async function GET(request: Request) {
       body: JSON.stringify({
         model: "claude-3-haiku-20240307",
         max_tokens: 3000,
-        messages: [
-          {
-            role: "user",
-            content: prompt,
-          },
-        ],
+        messages: [{ role: "user", content: prompt }],
       }),
       cache: "no-store",
     });
@@ -209,36 +199,95 @@ export async function GET(request: Request) {
     if (!anthropicRes.ok) {
       const errorBody = await anthropicRes.text();
       console.error("Anthropic API error:", anthropicRes.status, errorBody);
-      return NextResponse.json(
-        {
-          brief: PLACEHOLDER_BRIEF,
-          generated: new Date().toISOString(),
-          error: `Anthropic API returned ${anthropicRes.status}`,
-        },
-        { status: 200 }
-      );
+      return null;
     }
 
     const anthropicData = await anthropicRes.json();
-
-    // Extract the text content from the Anthropic response
     const brief =
       anthropicData.content
         ?.filter((block: { type: string }) => block.type === "text")
         .map((block: { text: string }) => block.text)
         .join("\n") || PLACEHOLDER_BRIEF;
 
-    return NextResponse.json(
-      {
-        brief,
-        generated: new Date().toISOString(),
-        model: anthropicData.model,
-        usage: anthropicData.usage,
-      },
-      { status: 200 }
-    );
+    return {
+      brief,
+      generated: new Date().toISOString(),
+      model: anthropicData.model,
+      usage: anthropicData.usage,
+    };
   } catch (error) {
     console.error("AI Brief generation failed:", error);
+    return null;
+  }
+}
+
+async function fetchAndUpdateCache(baseUrl: string, apiKey: string) {
+  try {
+    const fresh = await generateFreshBrief(baseUrl, apiKey);
+    if (!fresh) return;
+
+    const existing = await getDoc(cacheDoc);
+    const existingData = existing.exists() ? existing.data().data : null;
+
+    if (existingData && JSON.stringify(existingData) === JSON.stringify(fresh)) {
+      return;
+    }
+
+    await setDoc(cacheDoc, {
+      data: fresh,
+      updated_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("Background AI brief cache update failed:", err);
+  }
+}
+
+export async function GET(request: Request) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const url = new URL(request.url);
+  const baseUrl = `${url.protocol}//${url.host}`;
+
+  try {
+    const snap = await getDoc(cacheDoc);
+    const cached = snap.exists() ? snap.data() : null;
+
+    if (cached) {
+      if (apiKey) {
+        const ageMs = Date.now() - new Date(cached.updated_at).getTime();
+        if (ageMs > TTL_MS) {
+          fetchAndUpdateCache(baseUrl, apiKey);
+        }
+      }
+      return NextResponse.json({ ...cached.data, source: "cache" });
+    }
+
+    if (!apiKey) {
+      return NextResponse.json(
+        { brief: PLACEHOLDER_BRIEF, generated: new Date().toISOString(), cached: false },
+        { status: 200 }
+      );
+    }
+
+    const fresh = await generateFreshBrief(baseUrl, apiKey);
+    if (!fresh) {
+      return NextResponse.json(
+        {
+          brief: PLACEHOLDER_BRIEF,
+          generated: new Date().toISOString(),
+          error: "Brief generation failed",
+        },
+        { status: 200 }
+      );
+    }
+
+    await setDoc(cacheDoc, {
+      data: fresh,
+      updated_at: new Date().toISOString(),
+    });
+
+    return NextResponse.json(fresh, { status: 200 });
+  } catch (error) {
+    console.error("AI brief route error:", error);
     return NextResponse.json(
       {
         brief: PLACEHOLDER_BRIEF,
