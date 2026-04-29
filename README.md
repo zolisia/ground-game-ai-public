@@ -155,11 +155,57 @@ src/
 
 ---
 
+## Branches and remotes
+
+This repository is a fork. The Git layout is:
+
+| Remote | URL | Purpose |
+|---|---|---|
+| `origin` | https://github.com/zolisia/ground-game-ai-public | Personal fork — where all work lives and where production deploys from |
+| `upstream` | https://github.com/Steve-Aaron/ground-game-ai-public | Source repo — reference only, not part of the day-to-day flow |
+
+| Branch | Role |
+|---|---|
+| `zoja/dev` | Active working branch. **All commits land here first.** |
+| `main` | Production branch. Only updated via pull request from `zoja/dev` — never committed to directly. |
+
+Typical flow:
+
+```bash
+# Day-to-day: work on zoja/dev
+git checkout zoja/dev
+# … make changes, commit, push …
+git push origin zoja/dev
+
+# When ready to ship: open a PR from zoja/dev → main on GitHub
+# After merge, main gets the new commits and Vercel auto-deploys to production
+```
+
+---
+
 ## Deployment
 
 Designed to deploy on **Vercel**. The Firebase Firestore caching layer is provider-agnostic (works on any Node host), but the Next.js features used (`force-dynamic`, route handlers, `next/font`) are well-supported on Vercel out of the box.
 
-Set the same environment variables (Firebase + any optional keys) in your Vercel project settings before deploying.
+### Environment configuration
+
+Set the same environment variables (Firebase + any optional keys listed above) in your Vercel project settings before the first deploy. Vercel injects them at build time for `NEXT_PUBLIC_*` vars and at runtime for the rest.
+
+### Branch → environment mapping
+
+| Branch | Vercel environment | URL |
+|---|---|---|
+| `main` | Production | Project's primary domain |
+| `zoja/dev` | Preview | Auto-generated preview URL per push |
+| Any other branch | Preview | Auto-generated preview URL per push |
+
+Production deploys are triggered automatically when a PR from `zoja/dev` is merged into `main`. Pushes to `zoja/dev` get their own preview URL, which is the recommended way to verify changes before opening the PR.
+
+Each preview deploy gets its own URL but **shares the same Firestore project** as production by default. If you want preview deploys to use a separate cache, point `NEXT_PUBLIC_FIREBASE_PROJECT_ID` (and the related Firebase vars) at a second Firebase project for the Preview environment in Vercel's settings.
+
+### Cache warm-up after deploy
+
+Because every API route does a cache read on first request, the very first hit to a new deploy on a fresh Firestore database triggers synchronous upstream fetches (the cold-cache path described above). Expect the first dashboard load on a brand new environment to be slow; subsequent loads return cached data immediately while refreshes happen in the background.
 
 ---
 
