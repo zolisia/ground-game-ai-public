@@ -61,7 +61,7 @@ const CHANNELS: Channel[] = [
     name: "Times Radio",
     shortName: "TIMES",
     type: "youtube",
-    youtubeVideoId: "",
+    youtubeVideoId: "eTIATpVxKbI",
     directUrl: "https://www.youtube.com/@ListenToTimesRadio/live",
     color: "bg-blue-700/20",
     textColor: "text-blue-300",
