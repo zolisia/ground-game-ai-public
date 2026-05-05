@@ -57,7 +57,7 @@ function CustomTooltip({ active, payload, label }: { active?: boolean; payload?:
 }
 
 export default function ActivityCharts() {
-  const [tab, setTab] = useState<Tab>("mentions");
+  const [tab, setTab] = useState<Tab>("parliament");
   const [mentionData, setMentionData] = useState<MentionDataPoint[]>([]);
   const [parliamentData, setParliamentData] = useState<ParliamentDataPoint[]>([]);
   const [voteData, setVoteData] = useState<VoteDataPoint[]>([]);
@@ -132,9 +132,9 @@ export default function ActivityCharts() {
   }, []);
 
   const tabs: { id: Tab; label: string }[] = [
-    { id: "mentions", label: "Social Mentions" },
     { id: "parliament", label: "Parliamentary Activity" },
     { id: "votes", label: "Voting Record" },
+    { id: "mentions", label: "Social Mentions" },
   ];
 
   if (loading) {
