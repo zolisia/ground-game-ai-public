@@ -1,24 +1,57 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
-import { TrendingUp, ArrowUpRight, Search, BarChart3 } from "lucide-react";
+import { TrendingUp, Search, BarChart3 } from "lucide-react";
 
-// ── Types ───────────────────────────────────────────────────────────────────
+// ── Types — match /api/trends-v2 response shape ─────────────────────────────
 
-interface TrendItem {
-  query: string;
-  value: number;
-  rising?: boolean;
+interface TrendingSearch {
+  title: string;
+  traffic: string;
+  articleCount: number;
+  relatedQueries: string[];
 }
 
-interface TrendsData {
-  trends: TrendItem[];
-  relatedQueries: TrendItem[];
-  source: "mock" | "live" | "unavailable";
-  message?: string;
+interface InterestOverTimePoint {
+  date: string;
+  formattedDate: string;
+  values: Record<string, number>;
 }
 
-// ── Party colours ───────────────────────────────────────────────────────────
+interface RegionalComparison {
+  keyword: string;
+  eastOfEnglandValue: number | null;
+  nationalAverage: number;
+  rank: number | null;
+  totalRegions: number;
+}
+
+interface FreshnessReport {
+  trendingSearches: "ok" | "failed";
+  interestOverTime: "ok" | "failed";
+  regionalVsNational: "ok" | "failed";
+}
+
+interface TrendsV2Data {
+  trendingSearches: TrendingSearch[];
+  interestOverTime: InterestOverTimePoint[];
+  regionalVsNational: RegionalComparison[];
+  fetched_at?: string;
+  source?: string;
+  sourceUrl?: string;
+  note?: string;
+  freshness?: FreshnessReport;
+  keywordsUsed?: string[];
+  mpName?: string;
+  constituencyName?: string;
+  cached?: boolean;
+  error?: string;
+}
+
+// ── Party colours (dead-coded — retained for future use) ────────────────────
+// Kept available for when /api/trends-v2's regionalVsNational populates with
+// party-tagged keywords. The current rewrite uses only PARTY_COLORS.con
+// (for the MP series) and PARTY_COLORS.default (for the constituency series).
 
 const PARTY_COLORS: Record<string, string> = {
   con: "#0087DC",
@@ -27,6 +60,7 @@ const PARTY_COLORS: Record<string, string> = {
   default: "#10b981",
 };
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function getPartyColor(query: string): string {
   const q = query.toLowerCase();
   if (q.includes("cleverly") || q.includes("conservative")) return PARTY_COLORS.con;
@@ -35,6 +69,7 @@ function getPartyColor(query: string): string {
   return PARTY_COLORS.default;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function getPartyLabel(query: string): string {
   const q = query.toLowerCase();
   if (q.includes("cleverly")) return "CON";
@@ -43,39 +78,7 @@ function getPartyLabel(query: string): string {
   return "";
 }
 
-// ── Synthetic time-series for sparkline visualisation ────────────────────────
-// The API gives us a single "value" per query. We generate a plausible
-// 12-week trend line seeded from the query string so it's deterministic.
-
-function seedRandom(str: string): () => number {
-  let h = 0;
-  for (let i = 0; i < str.length; i++) {
-    h = Math.imul(31, h) + str.charCodeAt(i) | 0;
-  }
-  return () => {
-    h = Math.imul(h ^ (h >>> 16), 0x45d9f3b);
-    h = Math.imul(h ^ (h >>> 13), 0x45d9f3b);
-    h = (h ^ (h >>> 16)) >>> 0;
-    return (h % 1000) / 1000;
-  };
-}
-
-function generateTimeSeries(query: string, finalValue: number, points: number = 12): number[] {
-  const rng = seedRandom(query);
-  const series: number[] = [];
-  // Walk backwards from finalValue with bounded random steps
-  let v = finalValue;
-  const volatility = Math.max(8, finalValue * 0.15);
-  for (let i = points - 1; i >= 0; i--) {
-    series[i] = Math.max(0, Math.min(100, Math.round(v)));
-    v += (rng() - 0.55) * volatility; // slight downward bias going back
-  }
-  // Ensure last point matches the API value
-  series[points - 1] = finalValue;
-  return series;
-}
-
-// ── SVG Sparkline ───────────────────────────────────────────────────────────
+// ── SVG Sparkline (unchanged from previous version) ─────────────────────────
 
 interface SparklineProps {
   data: number[];
@@ -98,12 +101,10 @@ function Sparkline({ data, color, width = 280, height = 48, id }: SparklineProps
     y: padY + (1 - (v - min) / range) * (height - padY * 2),
   }));
 
-  // Build smooth path using catmull-rom to bezier conversion
   const linePath = points
     .map((p, i) => (i === 0 ? `M ${p.x},${p.y}` : `L ${p.x},${p.y}`))
     .join(" ");
 
-  // Area fill path
   const areaPath = `${linePath} L ${width},${height} L 0,${height} Z`;
 
   const gradientId = `grad-${id}`;
@@ -136,7 +137,6 @@ function Sparkline({ data, color, width = 280, height = 48, id }: SparklineProps
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-      {/* End dot */}
       <circle
         cx={points[points.length - 1].x}
         cy={points[points.length - 1].y}
@@ -154,7 +154,7 @@ function Sparkline({ data, color, width = 280, height = 48, id }: SparklineProps
   );
 }
 
-// ── Comparison chart: overlaid sparklines for key actors ─────────────────────
+// ── Comparison chart: overlaid sparklines for the time-series ───────────────
 
 interface ComparisonSeries {
   label: string;
@@ -162,7 +162,6 @@ interface ComparisonSeries {
   color: string;
   data: number[];
   current: number;
-  rising?: boolean;
 }
 
 function ComparisonChart({ series }: { series: ComparisonSeries[] }) {
@@ -171,7 +170,6 @@ function ComparisonChart({ series }: { series: ComparisonSeries[] }) {
   const padY = 8;
   const padX = 4;
 
-  // Global min/max across all series for consistent scale
   const allVals = series.flatMap((s) => s.data);
   const globalMax = Math.max(...allVals, 1);
   const globalMin = Math.min(...allVals, 0);
@@ -184,9 +182,9 @@ function ComparisonChart({ series }: { series: ComparisonSeries[] }) {
     }));
   }
 
-  // Week labels
-  const weeks = Array.from({ length: 12 }, (_, i) => `${12 - i}w`);
-  const labelIndices = [0, 3, 6, 9, 11];
+  const tickIndices = series[0]?.data.length
+    ? [0, Math.floor(series[0].data.length / 4), Math.floor(series[0].data.length / 2), Math.floor(3 * series[0].data.length / 4), series[0].data.length - 1]
+    : [];
 
   return (
     <div>
@@ -213,7 +211,6 @@ function ComparisonChart({ series }: { series: ComparisonSeries[] }) {
           ))}
         </defs>
 
-        {/* Subtle grid lines */}
         {[0.25, 0.5, 0.75].map((frac) => (
           <line
             key={frac}
@@ -226,7 +223,6 @@ function ComparisonChart({ series }: { series: ComparisonSeries[] }) {
           />
         ))}
 
-        {/* Area fills */}
         {series.map((s, idx) => {
           const pts = toPoints(s.data);
           const area =
@@ -235,7 +231,6 @@ function ComparisonChart({ series }: { series: ComparisonSeries[] }) {
           return <path key={`area-${idx}`} d={area} fill={`url(#comp-area-${idx})`} />;
         })}
 
-        {/* Lines */}
         {series.map((s, idx) => {
           const pts = toPoints(s.data);
           const d = pts
@@ -255,7 +250,6 @@ function ComparisonChart({ series }: { series: ComparisonSeries[] }) {
           );
         })}
 
-        {/* End dots */}
         {series.map((s, idx) => {
           const pts = toPoints(s.data);
           const last = pts[pts.length - 1];
@@ -267,12 +261,13 @@ function ComparisonChart({ series }: { series: ComparisonSeries[] }) {
           );
         })}
 
-        {/* X-axis labels */}
-        {labelIndices.map((li) => {
-          const x = padX + (li / 11) * (WIDTH - padX * 2);
+        {tickIndices.map((ti, i) => {
+          if (series[0]?.data.length <= 1) return null;
+          const x = padX + (ti / (series[0].data.length - 1)) * (WIDTH - padX * 2);
+          const labels = ["90d", "60d", "45d", "15d", "now"];
           return (
             <text
-              key={li}
+              key={i}
               x={x}
               y={HEIGHT + 12}
               textAnchor="middle"
@@ -280,13 +275,12 @@ function ComparisonChart({ series }: { series: ComparisonSeries[] }) {
               fontSize="8"
               fontFamily="system-ui, sans-serif"
             >
-              {weeks[li]}
+              {labels[i]}
             </text>
           );
         })}
       </svg>
 
-      {/* Legend */}
       <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 px-1">
         {series.map((s, idx) => (
           <div key={idx} className="flex items-center gap-1.5">
@@ -307,7 +301,6 @@ function ComparisonChart({ series }: { series: ComparisonSeries[] }) {
               </span>
             )}
             <span className="text-[11px] font-medium text-zinc-300">{s.current}</span>
-            {s.rising && <ArrowUpRight className="h-3 w-3 text-emerald-400" />}
           </div>
         ))}
       </div>
@@ -315,10 +308,20 @@ function ComparisonChart({ series }: { series: ComparisonSeries[] }) {
   );
 }
 
+// ── Inline empty-state placeholder ──────────────────────────────────────────
+
+function UnavailableSection({ height = "py-4" }: { height?: string }) {
+  return (
+    <div className={`bg-zinc-900/40 rounded-lg border border-zinc-800/50 px-3 ${height}`}>
+      <p className="text-xs text-zinc-500 text-center">Currently unavailable</p>
+    </div>
+  );
+}
+
 // ── Main Component ──────────────────────────────────────────────────────────
 
 export default function TrendsPanel() {
-  const [data, setData] = useState<TrendsData | null>(null);
+  const [data, setData] = useState<TrendsV2Data | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
@@ -326,8 +329,8 @@ export default function TrendsPanel() {
     let cancelled = false;
     async function fetchTrends() {
       try {
-        const res = await fetch("/api/trends");
-        if (!res.ok) throw new Error("Failed");
+        const res = await fetch("/api/trends-v2");
+        if (!res.ok && res.status !== 200) throw new Error("Failed");
         const json = await res.json();
         if (!cancelled) {
           setData(json);
@@ -342,40 +345,52 @@ export default function TrendsPanel() {
     return () => { cancelled = true; };
   }, []);
 
-  // Build comparison series from whichever data we have
-  const comparisonSeries = useMemo(() => {
-    const trends = data?.trends || [];
-    // Pick the key political actors for comparison
-    const actors = [
-      { match: "cleverly", fallbackLabel: "James Cleverly", color: PARTY_COLORS.con, tag: "CON" },
-      { match: "reform", fallbackLabel: "Reform UK", color: PARTY_COLORS.reform, tag: "REF" },
-      { match: "labour", fallbackLabel: "Labour Party", color: PARTY_COLORS.labour, tag: "LAB" },
-    ];
+  // Build the two-series time-series chart from interestOverTime.
+  // MP series uses CON blue; constituency series uses default green.
+  const comparisonSeries = useMemo<ComparisonSeries[]>(() => {
+    const points = data?.interestOverTime ?? [];
+    const mpName = data?.mpName;
+    const constituencyName = data?.constituencyName;
+    if (!points.length || !mpName || !constituencyName) return [];
 
-    const results: ComparisonSeries[] = [];
-    for (const actor of actors) {
-      const item = trends.find((t) => t.query.toLowerCase().includes(actor.match));
-      if (!item) continue;
-      results.push({
-        label: item.query,
-        partyTag: actor.tag,
-        color: actor.color,
-        data: generateTimeSeries(item.query, item.value),
-        current: item.value,
-        rising: item.rising,
-      });
-    }
-    return results;
+    const mpValues = points.map((p) => p.values?.[mpName] ?? 0);
+    const conValues = points.map((p) => p.values?.[constituencyName] ?? 0);
+
+    return [
+      {
+        label: mpName,
+        partyTag: "",
+        color: PARTY_COLORS.con,
+        data: mpValues,
+        current: mpValues[mpValues.length - 1] ?? 0,
+      },
+      {
+        label: constituencyName,
+        partyTag: "",
+        color: PARTY_COLORS.default,
+        data: conValues,
+        current: conValues[conValues.length - 1] ?? 0,
+      },
+    ];
   }, [data]);
 
-  // Remaining trends not in the comparison chart
-  const otherTrends = useMemo(() => {
-    const trends = data?.trends || [];
-    const compLabels = new Set(comparisonSeries.map((s) => s.label));
-    return trends.filter((t) => !compLabels.has(t.query));
-  }, [data, comparisonSeries]);
+  const interestOk = comparisonSeries.length > 0;
+  const regionalOk = (data?.regionalVsNational?.length ?? 0) > 0;
+  const trendingOk = (data?.trendingSearches?.length ?? 0) > 0;
 
-  const relatedQueries = data?.relatedQueries || [];
+  const fetchedTime = useMemo(() => {
+    if (!data?.fetched_at) return "";
+    try {
+      return new Date(data.fetched_at).toLocaleString("en-GB", {
+        day: "numeric",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {
+      return "";
+    }
+  }, [data?.fetched_at]);
 
   // ── Loading state ─────────────────────────────────────────────────────────
 
@@ -386,18 +401,15 @@ export default function TrendsPanel() {
           <div className="h-4 w-4 bg-zinc-800 rounded animate-pulse" />
           <div className="h-3 w-32 bg-zinc-800 rounded animate-pulse" />
         </div>
-        {/* Chart skeleton */}
         <div className="h-28 bg-zinc-900/50 rounded-lg animate-pulse" />
-        {/* Legend skeleton */}
         <div className="flex gap-4">
-          {[1, 2, 3].map((i) => (
+          {[1, 2].map((i) => (
             <div key={i} className="flex items-center gap-1">
               <div className="h-2.5 w-2.5 rounded-full bg-zinc-800 animate-pulse" />
               <div className="h-2.5 w-16 bg-zinc-800 rounded animate-pulse" />
             </div>
           ))}
         </div>
-        {/* Bars skeleton */}
         <div className="space-y-3 mt-2">
           {[1, 2, 3].map((i) => (
             <div key={i} className="space-y-1">
@@ -410,18 +422,18 @@ export default function TrendsPanel() {
     );
   }
 
-  // ── Unavailable state ───────────────────────────────────────────────────
-  if (data?.source === "unavailable" || (!data && error)) {
+  // ── Total-failure fallback (network error AND no data) ────────────────────
+  if (error && !data) {
     return (
       <div className="p-6 text-center">
         <div className="inline-flex items-center justify-center h-10 w-10 rounded-full bg-zinc-800/60 mb-3">
           <Search className="h-5 w-5 text-zinc-500" />
         </div>
         <p className="text-sm font-medium text-zinc-400">
-          Search trends not yet configured
+          Search trends data unavailable
         </p>
-        <p className="text-xs text-zinc-600 mt-1.5 max-w-[280px] mx-auto">
-          Connect a SerpAPI key to track Google search trends for your constituency.
+        <p className="text-[11px] text-zinc-600 mt-1.5 max-w-[280px] mx-auto">
+          Could not reach the trends route.
         </p>
       </div>
     );
@@ -431,111 +443,103 @@ export default function TrendsPanel() {
 
   return (
     <div className="space-y-5 p-1">
-      {/* Section: Comparison Chart */}
+      {/* Section: 90-day time-series chart */}
       <div className="px-3">
         <div className="flex items-center gap-2 mb-3">
           <BarChart3 className="h-3.5 w-3.5 text-emerald-400" />
           <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
-            Search Interest — 12 Week Trend
+            England-wide Search Interest — 90 days
           </span>
         </div>
 
-        <div className="bg-zinc-900/40 rounded-lg p-3 border border-zinc-800/50">
-          <ComparisonChart series={comparisonSeries} />
-        </div>
-
-        {error && (
-          <p className="text-[10px] text-amber-600/80 mt-1.5 px-1">
-            Could not reach trends API
-          </p>
+        {interestOk ? (
+          <>
+            <div className="bg-zinc-900/40 rounded-lg p-3 border border-zinc-800/50">
+              <ComparisonChart series={comparisonSeries} />
+            </div>
+            <p className="text-[10px] text-zinc-600 mt-1.5 px-1">
+              Party comparison data currently unavailable.
+            </p>
+          </>
+        ) : (
+          <UnavailableSection />
         )}
       </div>
 
-      {/* Section: Other search interest (sparkline bars) */}
-      {otherTrends.length > 0 && (
-        <div className="px-3">
-          <div className="flex items-center gap-2 mb-2">
-            <Search className="h-3 w-3 text-zinc-500" />
-            <span className="text-xs font-medium text-zinc-500">Local Search Interest</span>
-          </div>
-          <div className="space-y-3">
-            {otherTrends.map((t) => {
-              const series = generateTimeSeries(t.query, t.value, 12);
-              const color = getPartyColor(t.query);
-              return (
-                <div key={t.query}>
-                  <div className="flex justify-between items-center mb-1">
-                    <span className="text-[12px] text-zinc-300 flex items-center gap-1">
-                      {t.query}
-                      {t.rising && (
-                        <ArrowUpRight className="h-3 w-3 text-emerald-400" />
-                      )}
-                      {getPartyLabel(t.query) && (
-                        <span
-                          className="text-[9px] font-bold px-1 py-px rounded ml-0.5"
-                          style={{
-                            color: color,
-                            backgroundColor: `${color}18`,
-                          }}
-                        >
-                          {getPartyLabel(t.query)}
-                        </span>
-                      )}
-                    </span>
-                    <span className="text-[11px] font-medium text-zinc-400">{t.value}</span>
-                  </div>
-                  <div className="h-8 rounded overflow-hidden bg-zinc-900/30">
-                    <Sparkline
-                      data={series}
-                      color={color}
-                      height={32}
-                      id={t.query.replace(/\s+/g, "-")}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+      {/* Section: Regional vs national */}
+      <div className="px-3">
+        <div className="flex items-center gap-2 mb-2">
+          <Search className="h-3 w-3 text-zinc-500" />
+          <span
+            className="text-xs font-medium text-zinc-500"
+            title="Google Trends doesn't expose East of England as a query target, so this compares the East of England's slot in the regional breakdown against the UK average."
+          >
+            East of England vs UK average
+          </span>
         </div>
-      )}
 
-      {/* Section: Rising Queries */}
-      {relatedQueries.length > 0 && (
-        <div>
-          <div className="flex items-center gap-2 mb-2 px-3">
-            <TrendingUp className="h-3.5 w-3.5 text-emerald-400" />
-            <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
-              Rising Searches
-            </span>
-          </div>
-          <div className="bg-zinc-900/30 rounded-lg mx-2 border border-zinc-800/40 divide-y divide-zinc-800/40">
-            {relatedQueries.slice(0, 6).map((r) => (
-              <div
-                key={r.query}
-                className="flex justify-between items-center px-3 py-2 hover:bg-zinc-800/20 transition-colors"
-              >
-                <span className="text-[12px] text-zinc-300">{r.query}</span>
-                <span
-                  className={`text-[11px] font-semibold tabular-nums ${
-                    r.rising ? "text-emerald-400" : "text-zinc-500"
-                  }`}
-                >
-                  {r.rising && (
-                    <ArrowUpRight className="h-3 w-3 inline-block mr-0.5 -mt-0.5" />
-                  )}
-                  {r.rising ? `+${r.value}%` : r.value}
-                </span>
+        {regionalOk && data?.regionalVsNational ? (
+          <div className="bg-zinc-900/40 rounded-lg border border-zinc-800/50 divide-y divide-zinc-800/40">
+            {data.regionalVsNational.map((r) => (
+              <div key={r.keyword} className="px-3 py-2">
+                <div className="flex justify-between items-center mb-0.5">
+                  <span className="text-[12px] text-zinc-300">{r.keyword}</span>
+                  <span className="text-[11px] text-zinc-400 tabular-nums">
+                    EoE {r.eastOfEnglandValue ?? "—"} · avg {r.nationalAverage}
+                  </span>
+                </div>
+                {r.rank != null && (
+                  <p className="text-[10px] text-zinc-600">
+                    Rank {r.rank} of {r.totalRegions} regions
+                  </p>
+                )}
               </div>
             ))}
           </div>
+        ) : (
+          <UnavailableSection />
+        )}
+      </div>
+
+      {/* Section: Trending in the UK */}
+      <div>
+        <div className="flex items-center gap-2 mb-2 px-3">
+          <TrendingUp className="h-3.5 w-3.5 text-emerald-400" />
+          <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+            Trending in the UK
+          </span>
         </div>
-      )}
+
+        {trendingOk && data?.trendingSearches ? (
+          <div className="bg-zinc-900/30 rounded-lg mx-2 border border-zinc-800/40 divide-y divide-zinc-800/40">
+            {data.trendingSearches.slice(0, 6).map((t) => (
+              <div
+                key={t.title}
+                className="flex justify-between items-center px-3 py-2 hover:bg-zinc-800/20 transition-colors"
+              >
+                <span className="text-[12px] text-zinc-300">{t.title}</span>
+                {t.traffic && (
+                  <span className="text-[11px] font-semibold text-emerald-400 tabular-nums">
+                    {t.traffic}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="mx-2">
+            <UnavailableSection />
+          </div>
+        )}
+      </div>
 
       {/* Footer */}
       <div className="px-3 text-[10px] text-zinc-700 text-center pb-1">
-        Data via Google Trends &middot; Updates hourly
+        {fetchedTime ? `Updated ${fetchedTime} · ` : ""}Data via Google Trends
       </div>
     </div>
   );
 }
 
+// Re-export Sparkline to keep symbol available for potential future use.
+export { Sparkline };
