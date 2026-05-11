@@ -1,20 +1,24 @@
 import { NextResponse } from "next/server";
 import { doc, getDoc, setDoc, type DocumentReference } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { getFullData } from "@/data";
 
 export const dynamic = "force-dynamic";
 
 // ONS Census 2021 API — free, no auth required
 // https://api.beta.ons.gov.uk/v1
-// Fetches ward-level census data for all wards in the Braintree constituency
+// Fetches ward-level census data for the requested constituency.
 
 const TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 const ONS_API = "https://api.beta.ons.gov.uk/v1/population-types";
 
-// All 28 wards in the Braintree Parliamentary Constituency
+// Braintree-only fallback. Used when the data layer doesn't yet have ward data
+// for the requested constituency. See REFACTOR_AUDIT.md §5 (missing data) — the
+// ~107 non-English constituencies (Scotland/Wales/NI) have no wards populated.
+// All 28 wards in the Braintree Parliamentary Constituency:
 // 26 from Braintree District + 2 from Uttlesford District (Felsted & Stebbing, The Sampfords)
-const WARD_CODES = [
+const BRAINTREE_WARD_CODES = [
   "E05010365", "E05010366", "E05010367", "E05010368", "E05010369",
   "E05010370", "E05010371", "E05010372", "E05010374", "E05010378",
   "E05010379", "E05010380", "E05010382", "E05010383", "E05010384",
@@ -175,12 +179,12 @@ interface CensusData {
   source: string;
 }
 
-async function generateFreshData(topic: CensusTopic): Promise<CensusData | null> {
+async function generateFreshData(topic: CensusTopic, wardCodes: string[]): Promise<CensusData | null> {
   try {
     // Fetch data for all wards in parallel
     // ONS API supports querying one ward at a time
     const wardResults = await Promise.allSettled(
-      WARD_CODES.map(async (wardCode) => {
+      wardCodes.map(async (wardCode) => {
         const url = `${ONS_API}/${topic.populationType}/census-observations?dimensions=wd,${topic.dimension}&area-type=wd,${wardCode}`;
         const res = await fetch(url, {
           next: { revalidate: 604800 }, // Cache 7 days — census data doesn't change
@@ -281,9 +285,9 @@ async function generateFreshData(topic: CensusTopic): Promise<CensusData | null>
   }
 }
 
-async function fetchAndUpdateCache(topic: CensusTopic, cacheDocRef: DocumentReference) {
+async function fetchAndUpdateCache(topic: CensusTopic, cacheDocRef: DocumentReference, wardCodes: string[]) {
   try {
-    const fresh = await generateFreshData(topic);
+    const fresh = await generateFreshData(topic, wardCodes);
     if (!fresh) return;
 
     const existing = await getDoc(cacheDocRef);
@@ -322,8 +326,39 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unknown topic" }, { status: 400 });
   }
 
-  // One cache doc per topic so different choropleth selections don't overwrite each other
-  const cacheDocRef = doc(db, "census_cache", `braintree-${topicId}`);
+  // Multi-constituency lookup. Placed after the `?topic=list` and topic
+  // validation branches so the meta endpoint doesn't require a constituency.
+  const constituencySlug = searchParams.get("constituency") || "braintree";
+  const constituencyData = getFullData(constituencySlug);
+
+  if (!constituencyData) {
+    return Response.json(
+      { error: "Invalid constituency slug" },
+      { status: 400 }
+    );
+  }
+
+  // Try data-layer ward codes, fall back to Braintree's hardcoded list.
+  // ~107 non-English constituencies (Scotland/Wales/NI) have no ward data in
+  // the layer today — return a clean 400 for those.
+  const WARD_CODES =
+    constituencyData.areas?.wards?.map(w => w.code) ??
+    (constituencySlug === "braintree" ? BRAINTREE_WARD_CODES : null);
+
+  if (!WARD_CODES) {
+    return Response.json(
+      {
+        error: "Census data not available",
+        message: "Ward data not yet sourced for this constituency",
+        constituency: constituencySlug,
+      },
+      { status: 400 }
+    );
+  }
+
+  // One cache doc per (constituency, topic) so different choropleth selections
+  // don't overwrite each other and constituencies don't collide.
+  const cacheDocRef = doc(db, "census_cache", `${constituencySlug}-${topicId}`);
 
   try {
     const snap = await getDoc(cacheDocRef);
@@ -332,12 +367,12 @@ export async function GET(request: Request) {
     if (cached) {
       const ageMs = Date.now() - new Date(cached.updated_at).getTime();
       if (ageMs > TTL_MS) {
-        fetchAndUpdateCache(topic, cacheDocRef);
+        fetchAndUpdateCache(topic, cacheDocRef, WARD_CODES);
       }
       return NextResponse.json({ ...cached.data, source: "cache" });
     }
 
-    const fresh = await generateFreshData(topic);
+    const fresh = await generateFreshData(topic, WARD_CODES);
     if (!fresh) {
       return NextResponse.json(
         { error: "Failed to fetch census data" },

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getFullData } from "@/data";
 
 // Force dynamic — fetches live external data
 export const dynamic = "force-dynamic";
@@ -10,8 +11,10 @@ export const dynamic = "force-dynamic";
 
 const EPC_BASE = "https://epc.opendatacommunities.org/api/v1/domestic/search";
 
-// Postcodes covering Braintree constituency
-const POSTCODES = ["CM7", "CM77", "CO9"];
+// Braintree-only fallback. Used when the data layer doesn't yet have postcodes
+// for the requested constituency. See REFACTOR_AUDIT.md §5 (missing data) for
+// the per-constituency postcode sourcing task.
+const BRAINTREE_POSTCODES = ["CM7", "CM77", "CO9"];
 
 interface EPCRecord {
   address: string;
@@ -63,7 +66,40 @@ async function fetchEPCPage(
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const constituencySlug = searchParams.get("constituency") || "braintree";
+  const constituencyData = getFullData(constituencySlug);
+
+  if (!constituencyData) {
+    return Response.json(
+      { error: "Invalid constituency slug" },
+      { status: 400 }
+    );
+  }
+
+  // Try to get postcodes from data layer (forward-compatible: will be populated
+  // when per-constituency postcodes are sourced — see REFACTOR_AUDIT.md §5).
+  // Type cast because ConstituencyAreas doesn't yet declare a `postcodes` field;
+  // when added, this cast becomes a no-op.
+  const areasWithPostcodes = constituencyData.areas as
+    | { postcodes?: string[] }
+    | undefined;
+  const POSTCODES =
+    areasWithPostcodes?.postcodes ??
+    (constituencySlug === "braintree" ? BRAINTREE_POSTCODES : null);
+
+  if (!POSTCODES) {
+    return Response.json(
+      {
+        error: "EPC data not available",
+        message: "Postcode data not yet sourced for this constituency",
+        constituency: constituencySlug,
+      },
+      { status: 400 }
+    );
+  }
+
   const apiKey = process.env.EPC_API_KEY;
   const email = process.env.EPC_EMAIL ?? "";
 

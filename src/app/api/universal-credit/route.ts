@@ -1,17 +1,20 @@
 import { NextResponse } from "next/server";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, type DocumentReference } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { getFullData } from "@/data";
 
 export const dynamic = "force-dynamic";
 
 // Nomis / ONS Claimant Count — free, no auth required
-// Dataset NM_162_1: Claimant count by constituency
-// NOMIS geography code 721420347 = Braintree (wpca24 constituency type)
+// Dataset NM_162_1: Claimant count by constituency (wpca24 geography type).
 
 const TTL_MS = 24 * 60 * 60 * 1000;
-const cacheDoc = doc(db, "universal_credit_cache", "braintree");
 
-const CONSTITUENCY_CODE = "721420347";
+// Braintree-only fallback. Used when the data layer doesn't yet have a wpca24
+// constituency code for the requested constituency. See REFACTOR_AUDIT.md §5
+// (missing data) for the per-constituency wpca24Code sourcing task.
+const BRAINTREE_WPCA24 = "721420347";
+
 const BASE_URL = "https://www.nomisweb.co.uk/api/v01/dataset/NM_162_1.data.json";
 
 interface NomisNestedField {
@@ -63,7 +66,7 @@ function buildMonthRange(n: number): string {
   return months.join(",");
 }
 
-async function generateFreshData(): Promise<UniversalCreditData | null> {
+async function generateFreshData(wpca24Code: string): Promise<UniversalCreditData | null> {
   try {
     const timeRange = buildMonthRange(12);
 
@@ -71,17 +74,17 @@ async function generateFreshData(): Promise<UniversalCreditData | null> {
     const [currentRes, trendRes, ageRes] = await Promise.allSettled([
       // Latest count + rate
       fetch(
-        `${BASE_URL}?geography=${CONSTITUENCY_CODE}&time=latestMINUS2&measures=20100,20201&gender=0&age=0`,
+        `${BASE_URL}?geography=${wpca24Code}&time=latestMINUS2&measures=20100,20201&gender=0&age=0`,
         { next: { revalidate: 86400 } }
       ),
       // Last 12 months trend — count only
       fetch(
-        `${BASE_URL}?geography=${CONSTITUENCY_CODE}&time=${timeRange}&measures=20100&gender=0&age=0`,
+        `${BASE_URL}?geography=${wpca24Code}&time=${timeRange}&measures=20100&gender=0&age=0`,
         { next: { revalidate: 86400 } }
       ),
       // Age breakdown — latest month, all age bands
       fetch(
-        `${BASE_URL}?geography=${CONSTITUENCY_CODE}&time=latestMINUS2&measures=20100&gender=0&c_age=1...10`,
+        `${BASE_URL}?geography=${wpca24Code}&time=latestMINUS2&measures=20100&gender=0&c_age=1...10`,
         { next: { revalidate: 86400 } }
       ),
     ]);
@@ -112,7 +115,7 @@ async function generateFreshData(): Promise<UniversalCreditData | null> {
     if (!current.count) {
       try {
         const fb = await fetch(
-          `${BASE_URL}?geography=${CONSTITUENCY_CODE}&time=latestMINUS3&measures=20100&gender=0&age=0`,
+          `${BASE_URL}?geography=${wpca24Code}&time=latestMINUS3&measures=20100&gender=0&age=0`,
           { next: { revalidate: 86400 } }
         );
         if (fb.ok) {
@@ -179,19 +182,19 @@ async function generateFreshData(): Promise<UniversalCreditData | null> {
   }
 }
 
-async function fetchAndUpdateCache() {
+async function fetchAndUpdateCache(cacheDocRef: DocumentReference, wpca24Code: string) {
   try {
-    const fresh = await generateFreshData();
+    const fresh = await generateFreshData(wpca24Code);
     if (!fresh) return;
 
-    const existing = await getDoc(cacheDoc);
+    const existing = await getDoc(cacheDocRef);
     const existingData = existing.exists() ? existing.data().data : null;
 
     if (existingData && JSON.stringify(existingData) === JSON.stringify(fresh)) {
       return;
     }
 
-    await setDoc(cacheDoc, {
+    await setDoc(cacheDocRef, {
       data: fresh,
       updated_at: new Date().toISOString(),
     });
@@ -200,20 +203,54 @@ async function fetchAndUpdateCache() {
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const constituencySlug = searchParams.get("constituency") || "braintree";
+  const constituencyData = getFullData(constituencySlug);
+
+  if (!constituencyData) {
+    return Response.json(
+      { error: "Invalid constituency slug" },
+      { status: 400 }
+    );
+  }
+
+  // Try data-layer wpca24Code (forward-compatible — not yet declared on the
+  // Constituency type), fall back to Braintree's hardcoded code. The cast
+  // becomes a no-op once wpca24Code is added to the Constituency interface.
+  const constituencyWithWpca24 = constituencyData.constituency as {
+    wpca24Code?: string;
+  };
+  const CONSTITUENCY_CODE =
+    constituencyWithWpca24.wpca24Code ??
+    (constituencySlug === "braintree" ? BRAINTREE_WPCA24 : null);
+
+  if (!CONSTITUENCY_CODE) {
+    return Response.json(
+      {
+        error: "Universal Credit data not available",
+        message: "NOMIS wpca24Code not yet sourced for this constituency",
+        constituency: constituencySlug,
+      },
+      { status: 400 }
+    );
+  }
+
+  const cacheDocRef = doc(db, "universal_credit_cache", constituencySlug);
+
   try {
-    const snap = await getDoc(cacheDoc);
+    const snap = await getDoc(cacheDocRef);
     const cached = snap.exists() ? snap.data() : null;
 
     if (cached) {
       const ageMs = Date.now() - new Date(cached.updated_at).getTime();
       if (ageMs > TTL_MS) {
-        fetchAndUpdateCache();
+        fetchAndUpdateCache(cacheDocRef, CONSTITUENCY_CODE);
       }
       return NextResponse.json({ ...cached.data, source: "cache" });
     }
 
-    const fresh = await generateFreshData();
+    const fresh = await generateFreshData(CONSTITUENCY_CODE);
     if (!fresh) {
       return NextResponse.json(
         { current: null, trend: [], byAge: [], error: "Failed to fetch claimant count data" },
@@ -221,7 +258,7 @@ export async function GET() {
       );
     }
 
-    await setDoc(cacheDoc, {
+    await setDoc(cacheDocRef, {
       data: fresh,
       updated_at: new Date().toISOString(),
     });

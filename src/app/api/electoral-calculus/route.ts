@@ -65,7 +65,7 @@ function strip(s: string): string {
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const type = searchParams.get("type") || "seat"; // "seat" | "national" | "both"
-  const seat = searchParams.get("seat") || "Braintree";
+  const seat = searchParams.get("seat") || searchParams.get("constituency") || "braintree";
 
   try {
     if (type === "national" || type === "both") {
