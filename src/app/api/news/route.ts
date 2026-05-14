@@ -1,9 +1,16 @@
 import { NextResponse } from "next/server";
+import { getFullData } from "@/data";
 
 // Force dynamic — fetches live external data
 export const dynamic = "force-dynamic";
 
-const FEEDS = [
+// Braintree-only curated local news feeds. Used when slug === "braintree" to
+// preserve the existing higher-coverage local-newspaper sources (Essex Live,
+// Braintree & Witham Times, EADT) that aren't in the data layer. For other
+// constituencies, the 3 standard feeds from constituencyData.newsFeeds
+// (BBC regional + Google constituency search + Google MP search) are used.
+// Per-constituency local-newspaper sources would be better follow-up work.
+const BRAINTREE_FEEDS = [
   { name: "BBC Essex", url: "https://feeds.bbci.co.uk/news/england/essex/rss.xml" },
   { name: "Google News - Braintree", url: "https://news.google.com/rss/search?q=Braintree+Essex&hl=en-GB&gl=GB&ceid=GB:en" },
   { name: "Google News - Cleverly", url: "https://news.google.com/rss/search?q=James+Cleverly&hl=en-GB&gl=GB&ceid=GB:en" },
@@ -20,10 +27,45 @@ interface FeedItem {
   snippet: string;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const constituencySlug = searchParams.get("constituency") || "braintree";
+  const constituencyData = getFullData(constituencySlug);
+
+  if (!constituencyData) {
+    return Response.json(
+      { error: "Invalid constituency slug" },
+      { status: 400 }
+    );
+  }
+
+  // Decide feed list: Braintree curated, else build from newsFeeds object.
+  // ~107 non-English constituencies have no newsFeeds populated — return a
+  // clean 400 for those.
+  let feeds: Array<{ name: string; url: string }>;
+  if (constituencySlug === "braintree") {
+    feeds = BRAINTREE_FEEDS;
+  } else if (constituencyData.newsFeeds) {
+    const nf = constituencyData.newsFeeds;
+    feeds = [
+      { name: "BBC Regional", url: nf.bbcRegional },
+      { name: "Google News - Constituency", url: nf.googleConstituency },
+      { name: "Google News - MP", url: nf.googleMp },
+    ];
+  } else {
+    return Response.json(
+      {
+        error: "News feeds not available",
+        message: "News feed URLs not yet sourced for this constituency",
+        constituency: constituencySlug,
+      },
+      { status: 400 }
+    );
+  }
+
   const allItems: FeedItem[] = [];
 
-  for (const feed of FEEDS) {
+  for (const feed of feeds) {
     try {
       const res = await fetch(feed.url, {
         next: { revalidate: 900 }, // Cache for 15 minutes
