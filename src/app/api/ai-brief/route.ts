@@ -1,19 +1,31 @@
 import { NextResponse } from "next/server";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, type DocumentReference } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { getFullData } from "@/data";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 const TTL_MS = 30 * 60 * 1000;
 
-const cacheDoc = doc(db, "ai_brief_cache", "braintree");
+// Per-constituency placeholder. Date is computed at call time so the brief
+// reflects when the request happened (not when the module loaded).
+function buildPlaceholderBrief(
+  constituencyName: string,
+  mpName: string,
+  mpParty: string
+): string {
+  const today = new Date().toLocaleDateString("en-GB", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+  return `# Constituency Intelligence Brief — ${constituencyName}
 
-const PLACEHOLDER_BRIEF = `# Constituency Intelligence Brief — Braintree
+**Generated:** ${today}
 
-**Generated:** ${new Date().toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
-
-**MP:** James Cleverly (Conservative)
+**MP:** ${mpName} (${mpParty})
 
 ---
 
@@ -30,6 +42,7 @@ const PLACEHOLDER_BRIEF = `# Constituency Intelligence Brief — Braintree
 
 *Configure your API key to unlock daily AI-synthesised intelligence briefs.*
 `;
+}
 
 interface DataSources {
   news: unknown;
@@ -45,12 +58,18 @@ interface BriefData {
   usage?: unknown;
 }
 
-async function fetchLocalData(baseUrl: string): Promise<DataSources> {
+// NOTE: AI brief content accuracy depends on upstream routes being multi-
+// constituency. Currently only /api/parliament honours the ?constituency
+// parameter. /api/news, /api/crime, and /api/fixmystreet will return Braintree
+// data regardless of the param until they're refactored — at which point this
+// route's accuracy improves automatically with no further changes here.
+async function fetchLocalData(baseUrl: string, slug: string): Promise<DataSources> {
+  const c = encodeURIComponent(slug);
   const endpoints = [
-    { key: "news", path: "/api/news" },
-    { key: "crime", path: "/api/crime" },
-    { key: "parliament", path: "/api/parliament?type=votes" },
-    { key: "fixmystreet", path: "/api/fixmystreet" },
+    { key: "news", path: `/api/news?constituency=${c}` },
+    { key: "crime", path: `/api/crime?constituency=${c}` },
+    { key: "parliament", path: `/api/parliament?type=votes&constituency=${c}` },
+    { key: "fixmystreet", path: `/api/fixmystreet?constituency=${c}` },
   ];
 
   const results = await Promise.allSettled(
@@ -112,7 +131,12 @@ function summariseData(data: unknown, type: string): string {
   }
 }
 
-function buildPrompt(data: DataSources): string {
+function buildPrompt(
+  data: DataSources,
+  constituencyName: string,
+  mpName: string,
+  mpParty: string
+): string {
   const today = new Date().toLocaleDateString("en-GB", {
     weekday: "long",
     year: "numeric",
@@ -123,8 +147,8 @@ function buildPrompt(data: DataSources): string {
   return `You are a senior political intelligence analyst producing a daily constituency brief.
 
 Today's date: ${today}
-Constituency: Braintree
-MP: James Cleverly (Conservative)
+Constituency: ${constituencyName}
+MP: ${mpName} (${mpParty})
 
 Below is raw data collected from multiple sources. Synthesise it into a structured, actionable constituency intelligence brief in clean markdown format.
 
@@ -150,7 +174,7 @@ ${summariseData(data.fixmystreet, "fixmystreet")}
 
 Produce the brief with these sections in markdown:
 
-# Daily Constituency Intelligence Brief — Braintree
+# Daily Constituency Intelligence Brief — ${constituencyName}
 Include today's date and MP name.
 
 ## Top Local Stories
@@ -176,10 +200,17 @@ Note any emerging issues that could escalate — things to watch in the next 24-
 Keep the tone professional and analytical. Be specific — reference actual data points. Do not invent or hallucinate information not present in the source data.`;
 }
 
-async function generateFreshBrief(baseUrl: string, apiKey: string): Promise<BriefData | null> {
+async function generateFreshBrief(
+  baseUrl: string,
+  apiKey: string,
+  slug: string,
+  constituencyName: string,
+  mpName: string,
+  mpParty: string
+): Promise<BriefData | null> {
   try {
-    const data = await fetchLocalData(baseUrl);
-    const prompt = buildPrompt(data);
+    const data = await fetchLocalData(baseUrl, slug);
+    const prompt = buildPrompt(data, constituencyName, mpName, mpParty);
 
     const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -207,7 +238,7 @@ async function generateFreshBrief(baseUrl: string, apiKey: string): Promise<Brie
       anthropicData.content
         ?.filter((block: { type: string }) => block.type === "text")
         .map((block: { text: string }) => block.text)
-        .join("\n") || PLACEHOLDER_BRIEF;
+        .join("\n") || buildPlaceholderBrief(constituencyName, mpName, mpParty);
 
     return {
       brief,
@@ -221,19 +252,27 @@ async function generateFreshBrief(baseUrl: string, apiKey: string): Promise<Brie
   }
 }
 
-async function fetchAndUpdateCache(baseUrl: string, apiKey: string) {
+async function fetchAndUpdateCache(
+  baseUrl: string,
+  apiKey: string,
+  cacheDocRef: DocumentReference,
+  slug: string,
+  constituencyName: string,
+  mpName: string,
+  mpParty: string
+) {
   try {
-    const fresh = await generateFreshBrief(baseUrl, apiKey);
+    const fresh = await generateFreshBrief(baseUrl, apiKey, slug, constituencyName, mpName, mpParty);
     if (!fresh) return;
 
-    const existing = await getDoc(cacheDoc);
+    const existing = await getDoc(cacheDocRef);
     const existingData = existing.exists() ? existing.data().data : null;
 
     if (existingData && JSON.stringify(existingData) === JSON.stringify(fresh)) {
       return;
     }
 
-    await setDoc(cacheDoc, {
+    await setDoc(cacheDocRef, {
       data: fresh,
       updated_at: new Date().toISOString(),
     });
@@ -246,16 +285,41 @@ export async function GET(request: Request) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   const url = new URL(request.url);
   const baseUrl = `${url.protocol}//${url.host}`;
+  const { searchParams } = url;
+
+  const constituencySlug = searchParams.get("constituency") || "braintree";
+  const constituencyData = getFullData(constituencySlug);
+
+  if (!constituencyData) {
+    return Response.json(
+      { error: "Invalid constituency slug" },
+      { status: 400 }
+    );
+  }
+
+  if (!constituencyData.mp) {
+    return Response.json(
+      { error: "MP data not available for this constituency" },
+      { status: 400 }
+    );
+  }
+
+  const CONSTITUENCY_NAME = constituencyData.constituency.name;
+  const MP_NAME = constituencyData.mp.name;
+  const MP_PARTY = constituencyData.constituency.party;
+
+  const cacheDocRef = doc(db, "ai_brief_cache", constituencySlug);
+  const placeholderBrief = buildPlaceholderBrief(CONSTITUENCY_NAME, MP_NAME, MP_PARTY);
 
   try {
-    const snap = await getDoc(cacheDoc);
+    const snap = await getDoc(cacheDocRef);
     const cached = snap.exists() ? snap.data() : null;
 
     if (cached) {
       if (apiKey) {
         const ageMs = Date.now() - new Date(cached.updated_at).getTime();
         if (ageMs > TTL_MS) {
-          fetchAndUpdateCache(baseUrl, apiKey);
+          fetchAndUpdateCache(baseUrl, apiKey, cacheDocRef, constituencySlug, CONSTITUENCY_NAME, MP_NAME, MP_PARTY);
         }
       }
       return NextResponse.json({ ...cached.data, source: "cache" });
@@ -263,16 +327,16 @@ export async function GET(request: Request) {
 
     if (!apiKey) {
       return NextResponse.json(
-        { brief: PLACEHOLDER_BRIEF, generated: new Date().toISOString(), cached: false },
+        { brief: placeholderBrief, generated: new Date().toISOString(), cached: false },
         { status: 200 }
       );
     }
 
-    const fresh = await generateFreshBrief(baseUrl, apiKey);
+    const fresh = await generateFreshBrief(baseUrl, apiKey, constituencySlug, CONSTITUENCY_NAME, MP_NAME, MP_PARTY);
     if (!fresh) {
       return NextResponse.json(
         {
-          brief: PLACEHOLDER_BRIEF,
+          brief: placeholderBrief,
           generated: new Date().toISOString(),
           error: "Brief generation failed",
         },
@@ -280,7 +344,7 @@ export async function GET(request: Request) {
       );
     }
 
-    await setDoc(cacheDoc, {
+    await setDoc(cacheDocRef, {
       data: fresh,
       updated_at: new Date().toISOString(),
     });
@@ -290,7 +354,7 @@ export async function GET(request: Request) {
     console.error("AI brief route error:", error);
     return NextResponse.json(
       {
-        brief: PLACEHOLDER_BRIEF,
+        brief: placeholderBrief,
         generated: new Date().toISOString(),
         error: "Brief generation failed",
       },
