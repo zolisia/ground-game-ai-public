@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getFullData } from "@/data";
 
 // Force dynamic — needs runtime env vars (APIFY_API_TOKEN)
 export const dynamic = "force-dynamic";
@@ -37,9 +38,27 @@ interface ApifyTweet {
   author?: { userName?: string };
 }
 
-// Real 2024 General Election candidates for Braintree constituency
-// Source: Electoral Commission results
-const CANDIDATES = [
+// Real 2024 General Election candidates for Braintree constituency.
+// Source: Electoral Commission results.
+//
+// The data layer's `candidates` field only has {name, party, votes, share,
+// elected} — no Twitter handles, search terms, party colours, or council
+// representatives. Until that's sourced per-constituency, only Braintree has
+// the rich data needed to run Apify Twitter scrapes; other constituencies
+// get a 400 from the gate in GET().
+interface BraintreeCandidate {
+  party: string;
+  candidate: string;
+  handle: string;
+  votes2024: number;
+  votePct: string;
+  color: string;
+  searchTerms: string[];
+  councilRep: string;
+  councilHandle: string;
+}
+
+const BRAINTREE_CANDIDATES: BraintreeCandidate[] = [
   {
     party: "Reform UK",
     candidate: "Richard Thomson",
@@ -89,13 +108,13 @@ const CANDIDATES = [
 const APIFY_ACTOR = "apidojo/twitter-scraper-lite";
 const APIFY_BASE = "https://api.apify.com/v2/acts";
 
-async function fetchFromApify(): Promise<Opponent[]> {
+async function fetchFromApify(candidates: BraintreeCandidate[]): Promise<Opponent[]> {
   const token = process.env.APIFY_API_TOKEN;
   if (!token) return [];
 
   const results: Opponent[] = [];
 
-  for (const candidate of CANDIDATES) {
+  for (const candidate of candidates) {
     try {
       // Search for each party's mentions separately
       const searchQuery = candidate.searchTerms[0];
@@ -159,9 +178,9 @@ async function fetchFromApify(): Promise<Opponent[]> {
   return results;
 }
 
-function getCandidateInfo(): Opponent[] {
+function getCandidateInfo(candidates: BraintreeCandidate[]): Opponent[] {
   // Return real candidate data from the 2024 General Election — no fake social posts
-  return CANDIDATES.map((c) => ({
+  return candidates.map((c) => ({
     party: c.party,
     candidate: c.candidate,
     handle: c.handle || c.councilHandle || "",
@@ -172,9 +191,39 @@ function getCandidateInfo(): Opponent[] {
   }));
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const constituencySlug = searchParams.get("constituency") || "braintree";
+  const constituencyData = getFullData(constituencySlug);
+
+  if (!constituencyData) {
+    return Response.json(
+      { error: "Invalid constituency slug" },
+      { status: 400 }
+    );
+  }
+
+  // Only Braintree has the rich candidate data (Twitter handles, search
+  // terms, party colours, council reps) needed to run Apify scrapes. The
+  // data-layer `candidates` field only has {name, party, votes, share,
+  // elected} — not enough to drive social monitoring. Other constituencies
+  // get a clean 400 until that data is sourced.
+  const candidates = constituencySlug === "braintree" ? BRAINTREE_CANDIDATES : null;
+
+  if (!candidates) {
+    return Response.json(
+      {
+        error: "Opposition data not available",
+        message:
+          "Opposition candidate Twitter handles and search terms not yet sourced for this constituency",
+        constituency: constituencySlug,
+      },
+      { status: 400 }
+    );
+  }
+
   // Try Apify first
-  const apifyData = await fetchFromApify();
+  const apifyData = await fetchFromApify(candidates);
 
   // Check if Apify returned any actual posts
   const hasApifyPosts = apifyData.some((o) => o.recentPosts.length > 0);
@@ -189,7 +238,7 @@ export async function GET() {
 
   // No Apify data — return real candidate info without fake social posts
   return NextResponse.json({
-    opponents: getCandidateInfo(),
+    opponents: getCandidateInfo(candidates),
     lastUpdated: new Date().toISOString(),
     source: "candidates_only" as const,
     message: "Social activity monitoring not yet configured",

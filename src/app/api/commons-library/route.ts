@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, type DocumentReference } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { getFullData } from "@/data";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 15;
@@ -11,13 +12,12 @@ export const maxDuration = 15;
 // to build a comprehensive profile.
 
 const TTL_MS = 24 * 60 * 60 * 1000;
-const cacheDoc = doc(db, "commons_library_cache", "braintree");
 
-const CONSTITUENCY = "Braintree";
-const ONS_CODE = "E14001121";
-
-// NOMIS constituency report — provides labour market data
-const NOMIS_CODE = "721420347"; // NOMIS wpca24 code for Braintree
+// NOMIS wpca24 code for Braintree parliamentary constituency. The data layer
+// doesn't yet declare a `wpca24Code` field — same forward-compatible cast
+// pattern as /api/cqc's postcodes. Once sourced per-constituency, the cast
+// below will pick it up automatically.
+const BRAINTREE_WPCA24 = "721420347";
 
 interface DataSection {
   heading: string;
@@ -32,13 +32,15 @@ interface CommonsLibraryData {
   source: string;
   sourceUrl: string;
   scrapedAt: string;
+  note?: string;
 }
 
-async function fetchNomisReport(): Promise<DataSection[]> {
+async function fetchNomisReport(wpca24Code: string | null): Promise<DataSection[]> {
   const sections: DataSection[] = [];
 
   try {
-    // Employment rate from Annual Population Survey
+    // Employment rate from Annual Population Survey (GB-level, not
+    // constituency-specific — so always shown when available).
     const empRes = await fetch(
       `https://www.nomisweb.co.uk/api/v01/dataset/NM_17_5.data.json?geography=2092957703&variable=45&measures=20599&time=latest`,
       { next: { revalidate: 86400 }, signal: AbortSignal.timeout(8000) }
@@ -59,10 +61,13 @@ async function fetchNomisReport(): Promise<DataSection[]> {
     }
   } catch { /* continue */ }
 
+  // The next two endpoints are constituency-specific and need wpca24Code.
+  if (!wpca24Code) return sections;
+
   try {
     // Claimant count
     const ccRes = await fetch(
-      `https://www.nomisweb.co.uk/api/v01/dataset/NM_162_1.data.json?geography=${NOMIS_CODE}&time=latestMINUS2&measures=20100,20201&gender=0&age=0`,
+      `https://www.nomisweb.co.uk/api/v01/dataset/NM_162_1.data.json?geography=${wpca24Code}&time=latestMINUS2&measures=20100,20201&gender=0&age=0`,
       { next: { revalidate: 86400 }, signal: AbortSignal.timeout(8000) }
     );
     if (ccRes.ok) {
@@ -89,7 +94,7 @@ async function fetchNomisReport(): Promise<DataSection[]> {
   try {
     // Population estimates from NOMIS
     const popRes = await fetch(
-      `https://www.nomisweb.co.uk/api/v01/dataset/NM_2010_1.data.json?geography=${NOMIS_CODE}&time=latest&measures=20100&gender=0&c_age=200`,
+      `https://www.nomisweb.co.uk/api/v01/dataset/NM_2010_1.data.json?geography=${wpca24Code}&time=latest&measures=20100&gender=0&c_age=200`,
       { next: { revalidate: 86400 }, signal: AbortSignal.timeout(8000) }
     );
     if (popRes.ok) {
@@ -111,13 +116,13 @@ async function fetchNomisReport(): Promise<DataSection[]> {
   return sections;
 }
 
-async function fetchParliamentData(): Promise<DataSection[]> {
+async function fetchParliamentData(constituency: string): Promise<DataSection[]> {
   const sections: DataSection[] = [];
 
   try {
     // MP info from Parliament API
     const mpRes = await fetch(
-      `https://members-api.parliament.uk/api/Members/Search?Name=&Constituency=${encodeURIComponent(CONSTITUENCY)}&IsCurrentMember=true`,
+      `https://members-api.parliament.uk/api/Members/Search?Name=&Constituency=${encodeURIComponent(constituency)}&IsCurrentMember=true`,
       { next: { revalidate: 86400 }, signal: AbortSignal.timeout(8000) }
     );
     if (mpRes.ok) {
@@ -149,7 +154,13 @@ async function fetchParliamentData(): Promise<DataSection[]> {
 // Last updated: March 2026
 // Constituency vs England & East of England comparisons
 // Sources: Census 2021, ONS, NOMIS, Commons Library constituency profiles
-function getStaticProfile(): DataSection[] {
+//
+// Returns Braintree's curated profile only for slug === "braintree". For other
+// constituencies, returns an empty list — demographic comparison data has not
+// yet been sourced per-constituency, and showing Braintree's stats labelled as
+// another area would be misleading.
+function getStaticProfile(constituencySlug: string): DataSection[] {
+  if (constituencySlug !== "braintree") return [];
   return [
     {
       heading: "Population & Demographics",
@@ -224,60 +235,76 @@ function getStaticProfile(): DataSection[] {
   ];
 }
 
-async function generateFreshData(): Promise<CommonsLibraryData> {
+async function generateFreshData(
+  constituencySlug: string,
+  constituencyName: string,
+  onsCode: string,
+  wpca24Code: string | null
+): Promise<CommonsLibraryData> {
   // Fetch live NOMIS + Parliament data in parallel
   const [nomisSections, parliamentSections] = await Promise.allSettled([
-    fetchNomisReport(),
-    fetchParliamentData(),
+    fetchNomisReport(wpca24Code),
+    fetchParliamentData(constituencyName),
   ]);
 
   const liveSections: DataSection[] = [];
   if (nomisSections.status === "fulfilled") liveSections.push(...nomisSections.value);
   if (parliamentSections.status === "fulfilled") liveSections.push(...parliamentSections.value);
 
-  // Combine live data with static profile
-  const staticSections = getStaticProfile();
+  // Combine live data with static profile (Braintree only — others get [])
+  const staticSections = getStaticProfile(constituencySlug);
 
-  // Group into categories
   const grouped: Record<string, DataSection[]> = {};
 
-  // Add live data first (takes precedence in display)
+  // Live data first (takes precedence in display)
   for (const s of liveSections) {
     const cat = "live";
     if (!grouped[cat]) grouped[cat] = [];
     grouped[cat].push(s);
   }
 
-  // Add static profile sections
+  // Static profile sections
   for (const s of staticSections) {
     const cat = categorise(s.heading);
     if (!grouped[cat]) grouped[cat] = [];
     grouped[cat].push(s);
   }
 
+  const note =
+    staticSections.length === 0
+      ? "Static demographic profile not yet sourced for this constituency. Showing live NOMIS/Parliament data only."
+      : undefined;
+
   return {
-    constituency: CONSTITUENCY,
-    onsCode: ONS_CODE,
+    constituency: constituencyName,
+    onsCode,
     sections: grouped,
     sectionCount: liveSections.length + staticSections.length,
-    source: liveSections.length > 0 ? "mixed" : "static",
-    sourceUrl: `https://commonslibrary.parliament.uk/constituency/${CONSTITUENCY.toLowerCase()}/`,
+    source: liveSections.length > 0 ? (staticSections.length > 0 ? "mixed" : "live-only") : "static",
+    sourceUrl: `https://commonslibrary.parliament.uk/constituency/${constituencySlug}/`,
     scrapedAt: new Date().toISOString(),
+    ...(note && { note }),
   };
 }
 
-async function fetchAndUpdateCache() {
+async function fetchAndUpdateCache(
+  constituencySlug: string,
+  constituencyName: string,
+  onsCode: string,
+  wpca24Code: string | null,
+  cacheDocRef: DocumentReference
+) {
   try {
-    const fresh = await generateFreshData();
+    const fresh = await generateFreshData(constituencySlug, constituencyName, onsCode, wpca24Code);
 
-    const existing = await getDoc(cacheDoc);
+    const existing = await getDoc(cacheDocRef);
     const existingData = existing.exists() ? existing.data().data : null;
 
     if (existingData && JSON.stringify(existingData) === JSON.stringify(fresh)) {
       return;
     }
 
-    await setDoc(cacheDoc, {
+    await setDoc(cacheDocRef, {
       data: fresh,
       updated_at: new Date().toISOString(),
     });
@@ -286,22 +313,46 @@ async function fetchAndUpdateCache() {
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const constituencySlug = searchParams.get("constituency") || "braintree";
+  const constituencyData = getFullData(constituencySlug);
+
+  if (!constituencyData) {
+    return Response.json(
+      { error: "Invalid constituency slug" },
+      { status: 400 }
+    );
+  }
+
+  const constituencyName = constituencyData.constituency.name;
+  const onsCode = constituencyData.constituency.onsCode;
+
+  // Forward-compatible cast: `wpca24Code` isn't declared on Constituency yet.
+  // Same pattern as the postcodes cast in /api/cqc — when the field is
+  // sourced per-constituency, this lookup picks it up automatically.
+  const constituencyWithWpca = constituencyData.constituency as { wpca24Code?: string };
+  const wpca24Code =
+    constituencyWithWpca.wpca24Code ??
+    (constituencySlug === "braintree" ? BRAINTREE_WPCA24 : null);
+
+  const cacheDocRef = doc(db, "commons_library_cache", constituencySlug);
+
   try {
-    const snap = await getDoc(cacheDoc);
+    const snap = await getDoc(cacheDocRef);
     const cached = snap.exists() ? snap.data() : null;
 
     if (cached) {
       const ageMs = Date.now() - new Date(cached.updated_at).getTime();
       if (ageMs > TTL_MS) {
-        fetchAndUpdateCache();
+        fetchAndUpdateCache(constituencySlug, constituencyName, onsCode, wpca24Code, cacheDocRef);
       }
       return NextResponse.json({ ...cached.data, source: "cache" });
     }
 
-    const fresh = await generateFreshData();
+    const fresh = await generateFreshData(constituencySlug, constituencyName, onsCode, wpca24Code);
 
-    await setDoc(cacheDoc, {
+    await setDoc(cacheDocRef, {
       data: fresh,
       updated_at: new Date().toISOString(),
     });
@@ -309,8 +360,9 @@ export async function GET() {
     return NextResponse.json(fresh);
   } catch (err) {
     console.error("Commons Library API error:", err);
-    // Return static data as fallback
-    const staticSections = getStaticProfile();
+    // Return static data as fallback (Braintree only — others get an empty
+    // grouped sections object with a note).
+    const staticSections = getStaticProfile(constituencySlug);
     const grouped: Record<string, DataSection[]> = {};
     for (const s of staticSections) {
       const cat = categorise(s.heading);
@@ -318,13 +370,16 @@ export async function GET() {
       grouped[cat].push(s);
     }
     return NextResponse.json({
-      constituency: CONSTITUENCY,
-      onsCode: ONS_CODE,
+      constituency: constituencyName,
+      onsCode,
       sections: grouped,
       sectionCount: staticSections.length,
       source: "static",
-      sourceUrl: `https://commonslibrary.parliament.uk/constituency/${CONSTITUENCY.toLowerCase()}/`,
+      sourceUrl: `https://commonslibrary.parliament.uk/constituency/${constituencySlug}/`,
       scrapedAt: new Date().toISOString(),
+      ...(staticSections.length === 0 && {
+        note: "Static demographic profile not yet sourced for this constituency.",
+      }),
     });
   }
 }

@@ -1,15 +1,20 @@
 import { NextResponse } from "next/server";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, type DocumentReference } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { getFullData } from "@/data";
 
 export const dynamic = "force-dynamic";
 
 // HM Land Registry — Open Government Licence, no auth required
 // UK House Price Index: https://landregistry.data.gov.uk/
 // Price Paid Data: https://landregistry.data.gov.uk/data/ppi
+//
+// Geography: queries are keyed on the LAD name (UKHPI region uses mixed case
+// like "Braintree"; PPI district uses upper case like "BRAINTREE"). Land
+// Registry district names mostly match ONS LAD names but not always — some
+// constituencies will return empty results until verified per-LAD.
 
 const TTL_MS = 24 * 60 * 60 * 1000;
-const cacheDoc = doc(db, "house_prices_cache", "braintree");
 
 interface UKHPIItem {
   period: string;
@@ -45,15 +50,17 @@ interface HousePricesData {
   sourceUrl: string;
 }
 
-async function generateFreshData(): Promise<HousePricesData | null> {
+async function generateFreshData(ladName: string): Promise<HousePricesData | null> {
   try {
+    const ukhpiName = encodeURIComponent(ladName);
+    const ppiDistrict = encodeURIComponent(ladName.toUpperCase());
     const [indexRes, salesRes] = await Promise.allSettled([
       fetch(
-        "https://landregistry.data.gov.uk/data/ukhpi/region.json?name=Braintree&_pageSize=50",
+        `https://landregistry.data.gov.uk/data/ukhpi/region.json?name=${ukhpiName}&_pageSize=50`,
         { next: { revalidate: 86400 } }
       ),
       fetch(
-        "https://landregistry.data.gov.uk/data/ppi/transaction-record.json?propertyAddress.district=BRAINTREE&_pageSize=20&_sort=-transactionDate",
+        `https://landregistry.data.gov.uk/data/ppi/transaction-record.json?propertyAddress.district=${ppiDistrict}&_pageSize=20&_sort=-transactionDate`,
         { next: { revalidate: 86400 } }
       ),
     ]);
@@ -144,19 +151,22 @@ async function generateFreshData(): Promise<HousePricesData | null> {
   }
 }
 
-async function fetchAndUpdateCache() {
+async function fetchAndUpdateCache(
+  ladName: string,
+  cacheDocRef: DocumentReference
+) {
   try {
-    const fresh = await generateFreshData();
+    const fresh = await generateFreshData(ladName);
     if (!fresh) return;
 
-    const existing = await getDoc(cacheDoc);
+    const existing = await getDoc(cacheDocRef);
     const existingData = existing.exists() ? existing.data().data : null;
 
     if (existingData && JSON.stringify(existingData) === JSON.stringify(fresh)) {
       return;
     }
 
-    await setDoc(cacheDoc, {
+    await setDoc(cacheDocRef, {
       data: fresh,
       updated_at: new Date().toISOString(),
     });
@@ -165,20 +175,52 @@ async function fetchAndUpdateCache() {
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const constituencySlug = searchParams.get("constituency") || "braintree";
+  const constituencyData = getFullData(constituencySlug);
+
+  if (!constituencyData) {
+    return Response.json(
+      { error: "Invalid constituency slug" },
+      { status: 400 }
+    );
+  }
+
+  // Try data-layer LAD name (first LAD for multi-LAD constituencies), else
+  // Braintree-only fallback. Land Registry district names mostly match ONS
+  // LAD names but not always — some constituencies may return empty results
+  // until verified per-LAD.
+  const ladName =
+    constituencyData.areas?.lads?.[0]?.name ??
+    (constituencySlug === "braintree" ? "Braintree" : null);
+
+  if (!ladName) {
+    return Response.json(
+      {
+        error: "House prices data not available",
+        message: "LAD name not yet sourced for this constituency",
+        constituency: constituencySlug,
+      },
+      { status: 400 }
+    );
+  }
+
+  const cacheDocRef = doc(db, "house_prices_cache", constituencySlug);
+
   try {
-    const snap = await getDoc(cacheDoc);
+    const snap = await getDoc(cacheDocRef);
     const cached = snap.exists() ? snap.data() : null;
 
     if (cached) {
       const ageMs = Date.now() - new Date(cached.updated_at).getTime();
       if (ageMs > TTL_MS) {
-        fetchAndUpdateCache();
+        fetchAndUpdateCache(ladName, cacheDocRef);
       }
       return NextResponse.json({ ...cached.data, source: "cache" });
     }
 
-    const fresh = await generateFreshData();
+    const fresh = await generateFreshData(ladName);
     if (!fresh) {
       return NextResponse.json(
         { index: { items: [] }, recentSales: [], error: "Failed to fetch house price data" },
@@ -186,7 +228,7 @@ export async function GET() {
       );
     }
 
-    await setDoc(cacheDoc, {
+    await setDoc(cacheDocRef, {
       data: fresh,
       updated_at: new Date().toISOString(),
     });
