@@ -1,25 +1,29 @@
 import { NextResponse } from "next/server";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, type DocumentReference } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { getFullData } from "@/data";
 
 export const dynamic = "force-dynamic";
 
-// PHE Fingertips API — free, no auth required
+// PHE / OHID Fingertips API — free, no auth required
 // https://fingertips.phe.org.uk/api/
-// Fetches public health indicators for Braintree district (E07000067)
 //
-// NOTE: As of early 2026, the Fingertips data endpoints (/latest_data/*, /all_data/*)
-// are intermittently returning 500 errors. The metadata endpoints (/area_types,
-// /available_data) still work. We try multiple API patterns and fall back to
-// cached static data when the API is unavailable.
+// STATUS (early 2026): the Fingertips data endpoints (/latest_data/*,
+// /all_data/*) are intermittently returning 500 errors. The metadata
+// endpoints (/area_types, /available_data) still work. We try multiple API
+// patterns and fall back to cached static data when the API is unavailable.
+//
+// The static fallback below is a Braintree-only snapshot from the last known
+// good Fingertips response, so we only use it for slug === "braintree". For
+// every other constituency the live API works when it works; when it fails,
+// we return an empty indicator list with a note rather than misattribute
+// Braintree's figures to another area.
 
 const TTL_MS = 24 * 60 * 60 * 1000;
-const cacheDoc = doc(db, "health_cache", "braintree");
 
 const FINGERTIPS_API = "https://fingertips.phe.org.uk/api";
 
-// Area codes
-const BRAINTREE_DISTRICT = "E07000067";
+// England benchmark area (used to compare against).
 const ENGLAND = "E92000001";
 
 // Key health indicator IDs
@@ -70,6 +74,7 @@ interface HealthData {
   areaCode: string;
   source: string;
   sourceUrl: string;
+  note?: string;
 }
 
 function getSignificance(
@@ -90,9 +95,8 @@ function formatPeriod(timePeriod: string): string {
   return timePeriod;
 }
 
-// Try fetching from Fingertips with multiple area type IDs
-async function tryFingertipsFetch(): Promise<FingertipsDataPoint[] | null> {
-  // Try each area type ID (newest first)
+// Try fetching from Fingertips with multiple area type IDs / strategies.
+async function tryFingertipsFetch(districtCode: string): Promise<FingertipsDataPoint[] | null> {
   for (const areaTypeId of AREA_TYPE_IDS) {
     // Strategy 1: specific indicators for child areas of England
     try {
@@ -118,7 +122,7 @@ async function tryFingertipsFetch(): Promise<FingertipsDataPoint[] | null> {
 
     // Strategy 2: by area code directly
     try {
-      const url = `${FINGERTIPS_API}/latest_data/by_area_code?area_code=${BRAINTREE_DISTRICT}&area_type_id=${areaTypeId}`;
+      const url = `${FINGERTIPS_API}/latest_data/by_area_code?area_code=${districtCode}&area_type_id=${areaTypeId}`;
       const res = await fetch(url, {
         next: { revalidate: 86400 },
         headers: { Accept: "application/json" },
@@ -142,29 +146,32 @@ async function tryFingertipsFetch(): Promise<FingertipsDataPoint[] | null> {
   return null;
 }
 
-async function generateFreshData(): Promise<HealthData> {
+async function generateFreshData(
+  districtCode: string,
+  districtName: string,
+  constituencySlug: string
+): Promise<HealthData> {
   try {
-    const data = await tryFingertipsFetch();
+    const data = await tryFingertipsFetch(districtCode);
 
     if (data && data.length > 0) {
-      // Filter to Braintree and England
-      const braintreeData = data.filter(
-        (d) => d.AreaCode === BRAINTREE_DISTRICT && !d.CategoryTypeId
+      const localData = data.filter(
+        (d) => d.AreaCode === districtCode && !d.CategoryTypeId
       );
       const englandData = data.filter(
         (d) => d.AreaCode === ENGLAND && !d.CategoryTypeId
       );
 
       const indicators = processIndicators(
-        braintreeData.length > 0 ? braintreeData : data.filter((d) => !d.CategoryTypeId),
+        localData.length > 0 ? localData : data.filter((d) => !d.CategoryTypeId),
         englandData.length > 0 ? englandData : null
       );
 
       if (indicators.length > 0) {
         return {
           indicators,
-          areaName: "Braintree",
-          areaCode: BRAINTREE_DISTRICT,
+          areaName: districtName,
+          areaCode: districtCode,
           source: "PHE Fingertips",
           sourceUrl: "https://fingertips.phe.org.uk",
         };
@@ -174,28 +181,54 @@ async function generateFreshData(): Promise<HealthData> {
     console.error("Health API error:", err);
   }
 
-  // API is unavailable or returned no usable data — use static fallback
+  return getFallbackData(districtCode, districtName, constituencySlug);
+}
+
+function getFallbackData(
+  districtCode: string,
+  districtName: string,
+  constituencySlug: string
+): HealthData {
+  // The static fallback below is a Braintree-only snapshot. For any other
+  // constituency, return an empty result rather than mislabel Braintree's
+  // stats as theirs.
+  if (constituencySlug !== "braintree") {
+    return {
+      indicators: [],
+      areaName: districtName,
+      areaCode: districtCode,
+      source: "PHE Fingertips (unavailable)",
+      sourceUrl: "https://fingertips.phe.org.uk",
+      note: "Fingertips data endpoints are currently unavailable. Static fallback not yet sourced for this constituency.",
+    };
+  }
+
   return {
     indicators: FALLBACK_INDICATORS,
-    areaName: "Braintree",
-    areaCode: BRAINTREE_DISTRICT,
+    areaName: districtName,
+    areaCode: districtCode,
     source: "PHE Fingertips (cached)",
     sourceUrl: "https://fingertips.phe.org.uk",
   };
 }
 
-async function fetchAndUpdateCache() {
+async function fetchAndUpdateCache(
+  districtCode: string,
+  districtName: string,
+  constituencySlug: string,
+  cacheDocRef: DocumentReference
+) {
   try {
-    const fresh = await generateFreshData();
+    const fresh = await generateFreshData(districtCode, districtName, constituencySlug);
 
-    const existing = await getDoc(cacheDoc);
+    const existing = await getDoc(cacheDocRef);
     const existingData = existing.exists() ? existing.data().data : null;
 
     if (existingData && JSON.stringify(existingData) === JSON.stringify(fresh)) {
       return;
     }
 
-    await setDoc(cacheDoc, {
+    await setDoc(cacheDocRef, {
       data: fresh,
       updated_at: new Date().toISOString(),
     });
@@ -204,22 +237,54 @@ async function fetchAndUpdateCache() {
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const constituencySlug = searchParams.get("constituency") || "braintree";
+  const constituencyData = getFullData(constituencySlug);
+
+  if (!constituencyData) {
+    return Response.json(
+      { error: "Invalid constituency slug" },
+      { status: 400 }
+    );
+  }
+
+  // Pick the primary LAD/LTLA for Fingertips. Some constituencies span
+  // multiple districts (Braintree itself covers Braintree + Uttlesford);
+  // Fingertips doesn't aggregate across them, so we use the first LAD as
+  // primary. ~107 non-English constituencies have no areas data — return a
+  // clean 400 for those, matching the other multi-constituency routes.
+  const primaryLad = constituencyData.areas?.lads?.[0];
+  if (!primaryLad) {
+    return Response.json(
+      {
+        error: "Health data not available",
+        message: "Local authority district not yet sourced for this constituency",
+        constituency: constituencySlug,
+      },
+      { status: 400 }
+    );
+  }
+  const districtCode = primaryLad.code;
+  const districtName = primaryLad.name;
+
+  const cacheDocRef = doc(db, "health_cache", constituencySlug);
+
   try {
-    const snap = await getDoc(cacheDoc);
+    const snap = await getDoc(cacheDocRef);
     const cached = snap.exists() ? snap.data() : null;
 
     if (cached) {
       const ageMs = Date.now() - new Date(cached.updated_at).getTime();
       if (ageMs > TTL_MS) {
-        fetchAndUpdateCache();
+        fetchAndUpdateCache(districtCode, districtName, constituencySlug, cacheDocRef);
       }
       return NextResponse.json({ ...cached.data, source: "cache" });
     }
 
-    const fresh = await generateFreshData();
+    const fresh = await generateFreshData(districtCode, districtName, constituencySlug);
 
-    await setDoc(cacheDoc, {
+    await setDoc(cacheDocRef, {
       data: fresh,
       updated_at: new Date().toISOString(),
     });
@@ -227,29 +292,23 @@ export async function GET() {
     return NextResponse.json(fresh);
   } catch (err) {
     console.error("Health route error:", err);
-    return NextResponse.json({
-      indicators: FALLBACK_INDICATORS,
-      areaName: "Braintree",
-      areaCode: BRAINTREE_DISTRICT,
-      source: "PHE Fingertips (cached)",
-      sourceUrl: "https://fingertips.phe.org.uk",
-    });
+    return NextResponse.json(getFallbackData(districtCode, districtName, constituencySlug));
   }
 }
 
 function processIndicators(
-  braintreeData: FingertipsDataPoint[],
+  localData: FingertipsDataPoint[],
   englandData: FingertipsDataPoint[] | null
 ): HealthIndicator[] {
   const indicators: HealthIndicator[] = [];
 
-  const braintreeByIndicator = new Map<number, FingertipsDataPoint>();
-  for (const d of braintreeData) {
+  const localByIndicator = new Map<number, FingertipsDataPoint>();
+  for (const d of localData) {
     const indicatorMeta = INDICATORS[d.IndicatorId];
     if (!indicatorMeta) continue;
-    const existing = braintreeByIndicator.get(d.IndicatorId);
+    const existing = localByIndicator.get(d.IndicatorId);
     if (!existing || d.TimePeriodSortable > existing.TimePeriodSortable) {
-      braintreeByIndicator.set(d.IndicatorId, d);
+      localByIndicator.set(d.IndicatorId, d);
     }
   }
 
@@ -266,22 +325,22 @@ function processIndicators(
 
   for (const [indicatorId, meta] of Object.entries(INDICATORS)) {
     const id = Number(indicatorId);
-    const braintreePoint = braintreeByIndicator.get(id);
+    const localPoint = localByIndicator.get(id);
     const englandPoint = englandByIndicator.get(id);
 
-    if (!braintreePoint) continue;
+    if (!localPoint) continue;
 
     indicators.push({
       id,
       name: meta.name,
-      value: braintreePoint.Val,
+      value: localPoint.Val,
       unit: meta.unit,
       englandAvg: englandPoint?.Val ?? null,
       significance: getSignificance(
-        braintreePoint.Sig,
+        localPoint.Sig,
         meta.invertSignificance ?? false
       ),
-      period: formatPeriod(braintreePoint.TimePeriod),
+      period: formatPeriod(localPoint.TimePeriod),
     });
   }
 

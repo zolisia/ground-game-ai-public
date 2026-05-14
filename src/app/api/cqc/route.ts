@@ -1,22 +1,25 @@
 import { NextResponse } from "next/server";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, type DocumentReference } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { getFullData } from "@/data";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
-// Care Quality Commission (CQC) Public API — no auth required
+// Care Quality Commission (CQC) Public API — no auth required.
 // Docs: https://api.cqc.org.uk/public/v1
-// partnerCode is an optional identifier for tracking
+// partnerCode is an optional identifier for tracking (not per-constituency).
 
 const TTL_MS = 24 * 60 * 60 * 1000;
-const cacheDoc = doc(db, "cqc_cache", "braintree");
 
 const CQC_BASE = "https://api.cqc.org.uk/public/v1";
 const PARTNER_CODE = "GroundGame";
 
-// Postcodes covering Braintree constituency
-const POSTCODES = ["CM7", "CM77", "CO9"];
+// Braintree-only postcode fallback. The data layer doesn't yet have a
+// per-constituency `postcodes` field; same gap as /api/epc. When sourced,
+// the cast at the call site (`constituencyData.areas?.postcodes`) will pick
+// up the new field automatically.
+const BRAINTREE_POSTCODES = ["CM7", "CM77", "CO9"];
 
 const MAX_DETAIL_FETCHES = 15;
 
@@ -92,11 +95,14 @@ async function fetchLocationDetail(locationId: string): Promise<CQCLocationDetai
   }
 }
 
-async function generateFreshData(): Promise<CQCData> {
+async function generateFreshData(
+  postcodes: string[],
+  constituencySlug: string
+): Promise<CQCData> {
   try {
     // Fetch location lists for all postcodes in parallel
     const listResults = await Promise.allSettled(
-      POSTCODES.map((pc) => fetchLocationsForPostcode(pc))
+      postcodes.map((pc) => fetchLocationsForPostcode(pc))
     );
 
     // De-duplicate locations by ID
@@ -153,9 +159,10 @@ async function generateFreshData(): Promise<CQCData> {
       else if (ratingLower === "inadequate") ratingCounts.inadequate++;
     }
 
-    // If API returned no results (403 / blocked), use fallback
+    // If API returned no results (403 / blocked), use fallback (Braintree-only;
+    // empty for other constituencies — see getFallbackData).
     if (locations.length === 0) {
-      return getFallbackData();
+      return getFallbackData(constituencySlug);
     }
 
     return {
@@ -167,22 +174,26 @@ async function generateFreshData(): Promise<CQCData> {
       sourceUrl: "https://www.cqc.org.uk/",
     };
   } catch {
-    return getFallbackData();
+    return getFallbackData(constituencySlug);
   }
 }
 
-async function fetchAndUpdateCache() {
+async function fetchAndUpdateCache(
+  postcodes: string[],
+  constituencySlug: string,
+  cacheDocRef: DocumentReference
+) {
   try {
-    const fresh = await generateFreshData();
+    const fresh = await generateFreshData(postcodes, constituencySlug);
 
-    const existing = await getDoc(cacheDoc);
+    const existing = await getDoc(cacheDocRef);
     const existingData = existing.exists() ? existing.data().data : null;
 
     if (existingData && JSON.stringify(existingData) === JSON.stringify(fresh)) {
       return;
     }
 
-    await setDoc(cacheDoc, {
+    await setDoc(cacheDocRef, {
       data: fresh,
       updated_at: new Date().toISOString(),
     });
@@ -191,29 +202,64 @@ async function fetchAndUpdateCache() {
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const constituencySlug = searchParams.get("constituency") || "braintree";
+  const constituencyData = getFullData(constituencySlug);
+
+  if (!constituencyData) {
+    return Response.json(
+      { error: "Invalid constituency slug" },
+      { status: 400 }
+    );
+  }
+
+  // Determine postcodes: Braintree fallback, else try the (forward-compatible)
+  // data-layer field once it's populated. ConstituencyAreas doesn't yet declare
+  // a `postcodes` field — same cast pattern as /api/epc. Other constituencies
+  // get a clean 400 until postcode data is sourced.
+  const areasWithPostcodes = constituencyData.areas as
+    | { postcodes?: string[] }
+    | undefined;
+  const postcodes =
+    areasWithPostcodes?.postcodes ??
+    (constituencySlug === "braintree" ? BRAINTREE_POSTCODES : null);
+
+  if (!postcodes) {
+    return Response.json(
+      {
+        error: "CQC data not available",
+        message: "Postcode data not yet sourced for this constituency",
+        constituency: constituencySlug,
+      },
+      { status: 400 }
+    );
+  }
+
+  const cacheDocRef = doc(db, "cqc_cache", constituencySlug);
+
   try {
-    const snap = await getDoc(cacheDoc);
+    const snap = await getDoc(cacheDocRef);
     const cached = snap.exists() ? snap.data() : null;
 
     if (cached) {
       const ageMs = Date.now() - new Date(cached.updated_at).getTime();
       if (ageMs > TTL_MS) {
-        fetchAndUpdateCache();
+        fetchAndUpdateCache(postcodes, constituencySlug, cacheDocRef);
       }
       return NextResponse.json({ ...cached.data, source: "cache" });
     }
 
-    const fresh = await generateFreshData();
+    const fresh = await generateFreshData(postcodes, constituencySlug);
 
-    await setDoc(cacheDoc, {
+    await setDoc(cacheDocRef, {
       data: fresh,
       updated_at: new Date().toISOString(),
     });
 
     return NextResponse.json(fresh);
   } catch {
-    return NextResponse.json(getFallbackData());
+    return NextResponse.json(getFallbackData(constituencySlug));
   }
 }
 
@@ -223,7 +269,23 @@ function cqcSearch(name: string): string {
   return `https://www.google.com/search?q=${encodeURIComponent(name + " CQC inspection report")}`;
 }
 
-function getFallbackData(): CQCData {
+function getFallbackData(constituencySlug: string): CQCData {
+  // The hardcoded fallback list below is the Braintree-area care directory.
+  // For any other constituency, return an empty result rather than mislabel
+  // Braintree facilities as theirs. Per-constituency directories would need
+  // to be sourced before lifting this.
+  if (constituencySlug !== "braintree") {
+    return {
+      locations: [],
+      summary: { outstanding: 0, good: 0, requiresImprovement: 0, inadequate: 0 },
+      totalFound: 0,
+      detailsFetched: 0,
+      source: "fallback",
+      sourceUrl: "https://www.cqc.org.uk/",
+      note: "CQC fallback directory not yet sourced for this constituency.",
+    };
+  }
+
   const locations: LocationResult[] = [
     { name: "Braintree Community Hospital", type: "Hospital", rating: "Good", lastInspection: "2024-06-15", beds: 30, postcode: "CM7 1TG", reportUrl: null, cqcUrl: cqcSearch("Braintree Community Hospital") },
     { name: "Highwood House Care Home", type: "Care home", rating: "Good", lastInspection: "2024-03-22", beds: 40, postcode: "CM7 5LJ", reportUrl: null, cqcUrl: cqcSearch("Highwood House") },
