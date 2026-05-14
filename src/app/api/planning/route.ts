@@ -1,20 +1,34 @@
 import { NextResponse } from "next/server";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, type DocumentReference } from "firebase/firestore";
 import { isInsideConstituency } from "@/lib/geo";
 import { db } from "@/lib/firebase";
+import { getFullData } from "@/data";
 
 export const dynamic = "force-dynamic";
 
-// PlanIt API for planning applications in the Braintree constituency area
-// Free API, no auth required
-// Bounding box covers the FULL parliamentary constituency with padding:
-// Extends south to ~51.75 (Tiptree, Wickham Bishops) and west to ~0.30
+// PlanIt API for planning applications — free, no auth.
+// Per request, sends a bounding box for the requested constituency, then
+// filters results via isInsideConstituency() to drop anything outside the
+// actual polygon.
 
-const PLANIT_URL =
-  "https://www.planit.org.uk/api/applics/json?bbox=0.30,51.75,0.79,52.09&recent=60&limit=100";
+const PLANIT_BASE = "https://www.planit.org.uk/api/applics/json";
+
+// Braintree-only curated bbox. Slightly padded vs. the actual extent
+// (extends south to ~51.75 to catch Tiptree/Wickham Bishops, west to ~0.30).
+// Used when slug === "braintree" to preserve the existing coverage.
+// For other constituencies, the data layer's `geo.bbox` is formatted to
+// match PlanIt's expected lng,lat,lng,lat string.
+const BRAINTREE_BBOX = "0.30,51.75,0.79,52.09";
+
+function buildPlanItUrl(bbox: string): string {
+  return `${PLANIT_BASE}?bbox=${bbox}&recent=60&limit=100`;
+}
+
+function bboxArrayToString(bbox: [number, number, number, number]): string {
+  return bbox.map((n) => n.toFixed(4)).join(",");
+}
 
 const TTL_MS = 60 * 60 * 1000;
-const cacheDoc = doc(db, "planning_cache", "braintree");
 
 interface PlanItRecord {
   uid?: string;
@@ -58,9 +72,12 @@ interface PlanningData {
   total: number;
 }
 
-async function generateFreshData(): Promise<PlanningData | null> {
+async function generateFreshData(
+  bbox: string,
+  constituencySlug: string
+): Promise<PlanningData | null> {
   try {
-    const res = await fetch(PLANIT_URL, {
+    const res = await fetch(buildPlanItUrl(bbox), {
       next: { revalidate: 86400 },
       headers: {
         "User-Agent": "Mozilla/5.0 (compatible; GroundGameAI/1.0)",
@@ -94,7 +111,7 @@ async function generateFreshData(): Promise<PlanningData | null> {
         local_authority: record.area_name || record.authority_name || "",
       }))
       .filter((app) => app.lat !== 0 && app.lng !== 0)
-      .filter((app) => isInsideConstituency(app.lng, app.lat));
+      .filter((app) => isInsideConstituency(app.lng, app.lat, constituencySlug));
 
     return { applications, total: applications.length };
   } catch (err) {
@@ -103,19 +120,23 @@ async function generateFreshData(): Promise<PlanningData | null> {
   }
 }
 
-async function fetchAndUpdateCache() {
+async function fetchAndUpdateCache(
+  bbox: string,
+  constituencySlug: string,
+  cacheDocRef: DocumentReference
+) {
   try {
-    const fresh = await generateFreshData();
+    const fresh = await generateFreshData(bbox, constituencySlug);
     if (!fresh) return;
 
-    const existing = await getDoc(cacheDoc);
+    const existing = await getDoc(cacheDocRef);
     const existingData = existing.exists() ? existing.data().data : null;
 
     if (existingData && JSON.stringify(existingData) === JSON.stringify(fresh)) {
       return;
     }
 
-    await setDoc(cacheDoc, {
+    await setDoc(cacheDocRef, {
       data: fresh,
       updated_at: new Date().toISOString(),
     });
@@ -124,25 +145,57 @@ async function fetchAndUpdateCache() {
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const constituencySlug = searchParams.get("constituency") || "braintree";
+  const constituencyData = getFullData(constituencySlug);
+
+  if (!constituencyData) {
+    return Response.json(
+      { error: "Invalid constituency slug" },
+      { status: 400 }
+    );
+  }
+
+  // Determine bbox: curated Braintree fallback, else format constituency.geo.bbox
+  // to PlanIt's lng,lat,lng,lat string. ~107 non-English constituencies have
+  // no geo data populated — return a clean 400 for those.
+  let bbox: string;
+  if (constituencySlug === "braintree") {
+    bbox = BRAINTREE_BBOX;
+  } else if (constituencyData.geo?.bbox) {
+    bbox = bboxArrayToString(constituencyData.geo.bbox);
+  } else {
+    return Response.json(
+      {
+        error: "Planning data not available",
+        message: "Geographic bbox not yet sourced for this constituency",
+        constituency: constituencySlug,
+      },
+      { status: 400 }
+    );
+  }
+
+  const cacheDocRef = doc(db, "planning_cache", constituencySlug);
+
   try {
-    const snap = await getDoc(cacheDoc);
+    const snap = await getDoc(cacheDocRef);
     const cached = snap.exists() ? snap.data() : null;
 
     if (cached) {
       const ageMs = Date.now() - new Date(cached.updated_at).getTime();
       if (ageMs > TTL_MS) {
-        fetchAndUpdateCache();
+        fetchAndUpdateCache(bbox, constituencySlug, cacheDocRef);
       }
       return NextResponse.json({ ...cached.data, source: "cache" });
     }
 
-    const fresh = await generateFreshData();
+    const fresh = await generateFreshData(bbox, constituencySlug);
     if (!fresh) {
       return NextResponse.json({ applications: [], total: 0 });
     }
 
-    await setDoc(cacheDoc, {
+    await setDoc(cacheDocRef, {
       data: fresh,
       updated_at: new Date().toISOString(),
     });

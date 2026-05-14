@@ -1,16 +1,22 @@
 import { NextResponse } from "next/server";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, type DocumentReference } from "firebase/firestore";
 import { isInsideConstituency } from "@/lib/geo";
 import { db } from "@/lib/firebase";
+import { getFullData } from "@/data";
 
 export const dynamic = "force-dynamic";
 
-// DfE Get Information About Schools (GIAS) — schools in/near Braintree constituency
-// Primary API: GIAS search by location
-// Fallback: static data for key schools in the constituency
+// DfE Get Information About Schools (GIAS) — Braintree only.
+// Primary API: GIAS search by location.
+// Fallback: static BRAINTREE_SCHOOLS list.
+// Multi-constituency status: locked to Braintree until per-constituency school
+// data is sourced. The GIAS URL still hardcodes Braintree's location coords
+// (safely unreachable for other slugs because the GET handler returns 400
+// before reaching the fetch). When expanding, replace the URL's Location/
+// LocationCoords with per-constituency values and add per-constituency
+// fallback arrays.
 
 const TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const cacheDoc = doc(db, "schools_cache", "braintree");
 
 interface GIASSchool {
   URN: number;
@@ -65,8 +71,12 @@ function normaliseOfsted(rating: string): string {
   return "Not inspected";
 }
 
-// Static fallback data for schools in the Braintree constituency
-const FALLBACK_SCHOOLS: School[] = [
+// Static fallback list of schools in the Braintree constituency. Used both
+// as the GIAS-API fallback (when the live call fails) and as the response
+// for the Braintree code path. Other constituencies are rejected with a 400
+// before reaching this point — per-constituency school lists would need to
+// be sourced before lifting that restriction.
+const BRAINTREE_SCHOOLS: School[] = [
   { name: "Alec Hunter Academy", type: "Secondary", ofstedRating: "Good", lat: 51.8773, lng: 0.5530, ageRange: "11-16", pupils: 1100, address: "Stubbs Lane, Braintree CM7 3NR", urn: 137270 },
   { name: "Tabor Academy", type: "Secondary", ofstedRating: "Good", lat: 51.8746, lng: 0.5480, ageRange: "11-18", pupils: 1200, address: "Panfield Lane, Braintree CM7 5XP", urn: 137186 },
   { name: "Notley High School & Braintree Sixth Form", type: "Secondary", ofstedRating: "Good", lat: 51.8572, lng: 0.5653, ageRange: "11-18", pupils: 1600, address: "Notley Road, Braintree CM7 1WY", urn: 137261 },
@@ -91,7 +101,7 @@ const FALLBACK_SCHOOLS: School[] = [
   { name: "Great Saling Primary School", type: "Primary", ofstedRating: "Good", lat: 51.8876, lng: 0.4577, ageRange: "4-11", pupils: 98, address: "The Street, Great Saling CM7 4RB", urn: 114919 },
 ];
 
-async function generateFreshData(): Promise<SchoolsData> {
+async function generateFreshData(constituencySlug: string): Promise<SchoolsData> {
   try {
     // Attempt GIAS API call
     const apiUrl =
@@ -119,7 +129,7 @@ async function generateFreshData(): Promise<SchoolsData> {
       .filter((e) => {
         const lat = parseFloat(e.Latitude);
         const lng = parseFloat(e.Longitude);
-        return !isNaN(lat) && !isNaN(lng) && isInsideConstituency(lng, lat);
+        return !isNaN(lat) && !isNaN(lng) && isInsideConstituency(lng, lat, constituencySlug);
       })
       .map((e) => ({
         name: e.EstablishmentName,
@@ -142,25 +152,28 @@ async function generateFreshData(): Promise<SchoolsData> {
     };
   } catch {
     return {
-      schools: FALLBACK_SCHOOLS,
-      summary: buildSummary(FALLBACK_SCHOOLS),
+      schools: BRAINTREE_SCHOOLS,
+      summary: buildSummary(BRAINTREE_SCHOOLS),
       source: "fallback",
     };
   }
 }
 
-async function fetchAndUpdateCache() {
+async function fetchAndUpdateCache(
+  constituencySlug: string,
+  cacheDocRef: DocumentReference
+) {
   try {
-    const fresh = await generateFreshData();
+    const fresh = await generateFreshData(constituencySlug);
 
-    const existing = await getDoc(cacheDoc);
+    const existing = await getDoc(cacheDocRef);
     const existingData = existing.exists() ? existing.data().data : null;
 
     if (existingData && JSON.stringify(existingData) === JSON.stringify(fresh)) {
       return;
     }
 
-    await setDoc(cacheDoc, {
+    await setDoc(cacheDocRef, {
       data: fresh,
       updated_at: new Date().toISOString(),
     });
@@ -169,22 +182,49 @@ async function fetchAndUpdateCache() {
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const constituencySlug = searchParams.get("constituency") || "braintree";
+  const constituencyData = getFullData(constituencySlug);
+
+  if (!constituencyData) {
+    return Response.json(
+      { error: "Invalid constituency slug" },
+      { status: 400 }
+    );
+  }
+
+  // Braintree-only constraint: school data hasn't been sourced for other
+  // constituencies. Return a clean 400 rather than misleading Braintree data
+  // labelled as another constituency's.
+  if (constituencySlug !== "braintree") {
+    return Response.json(
+      {
+        error: "Schools data not available",
+        message: "School data not yet sourced for this constituency",
+        constituency: constituencySlug,
+      },
+      { status: 400 }
+    );
+  }
+
+  const cacheDocRef = doc(db, "schools_cache", constituencySlug);
+
   try {
-    const snap = await getDoc(cacheDoc);
+    const snap = await getDoc(cacheDocRef);
     const cached = snap.exists() ? snap.data() : null;
 
     if (cached) {
       const ageMs = Date.now() - new Date(cached.updated_at).getTime();
       if (ageMs > TTL_MS) {
-        fetchAndUpdateCache();
+        fetchAndUpdateCache(constituencySlug, cacheDocRef);
       }
       return NextResponse.json({ ...cached.data, source: "cache" });
     }
 
-    const fresh = await generateFreshData();
+    const fresh = await generateFreshData(constituencySlug);
 
-    await setDoc(cacheDoc, {
+    await setDoc(cacheDocRef, {
       data: fresh,
       updated_at: new Date().toISOString(),
     });
@@ -192,8 +232,8 @@ export async function GET() {
     return NextResponse.json(fresh);
   } catch {
     return NextResponse.json({
-      schools: FALLBACK_SCHOOLS,
-      summary: buildSummary(FALLBACK_SCHOOLS),
+      schools: BRAINTREE_SCHOOLS,
+      summary: buildSummary(BRAINTREE_SCHOOLS),
       source: "fallback",
     });
   }

@@ -1,16 +1,17 @@
 import { NextResponse } from "next/server";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, type DocumentReference } from "firebase/firestore";
 import { isInsideConstituency } from "@/lib/geo";
 import { db } from "@/lib/firebase";
+import { getFullData } from "@/data";
 
 export const dynamic = "force-dynamic";
 
 const EA_API = "https://environment.data.gov.uk/flood-monitoring";
-const CENTER_LAT = 51.96;
-const CENTER_LNG = 0.55;
+// TODO: derive RADIUS_KM from constituency bbox size — fixed 20km may
+// over-fetch for tiny urban constituencies and under-fetch for huge rural
+// ones. Post-filter via isInsideConstituency keeps results correct either
+// way; only efficiency is affected.
 const RADIUS_KM = 20;
-
-const cacheDoc = doc(db, "flood_cache", "braintree");
 
 interface FloodWarning {
   id: string;
@@ -34,77 +35,96 @@ interface MonitoringStation {
   unit: string;
 }
 
-async function fetchAndUpdateCache() {
+interface FloodData {
+  warnings: FloodWarning[];
+  stations: MonitoringStation[];
+  activeWarnings: number;
+  source: string;
+}
+
+async function generateFreshData(
+  centerLat: number,
+  centerLng: number,
+  constituencySlug: string
+): Promise<FloodData> {
+  const [warningsRes, stationsRes] = await Promise.allSettled([
+    fetch(`${EA_API}/id/floods?lat=${centerLat}&long=${centerLng}&dist=${RADIUS_KM}`, {
+      headers: { Accept: "application/json" },
+    }),
+    fetch(`${EA_API}/id/stations?lat=${centerLat}&long=${centerLng}&dist=${RADIUS_KM}&_limit=20`, {
+      headers: { Accept: "application/json" },
+    }),
+  ]);
+
+  const warnings: FloodWarning[] = [];
+  const stations: MonitoringStation[] = [];
+
+  if (warningsRes.status === "fulfilled" && warningsRes.value.ok) {
+    const data = await warningsRes.value.json();
+    for (const item of data.items || []) {
+      warnings.push({
+        id: item["@id"] || "",
+        description: item.description || "",
+        severity: item.severityLevel
+          ? ["", "Severe", "Warning", "Alert", "No Longer"][item.severityLevel] || "Unknown"
+          : "Unknown",
+        severityLevel: item.severityLevel || 0,
+        message: item.message || "",
+        timeRaised: item.timeRaised || "",
+        area: item.floodArea?.label || item.eaAreaName || "",
+      });
+    }
+  }
+
+  if (stationsRes.status === "fulfilled" && stationsRes.value.ok) {
+    const data = await stationsRes.value.json();
+    for (const item of data.items || []) {
+      stations.push({
+        id: item["@id"] || "",
+        label: item.label || "",
+        lat: item.lat || 0,
+        lng: item.long || 0,
+        river: item.riverName || "",
+        type: item.measures?.[0]?.parameterName || "Level",
+        latestValue: item.measures?.[0]?.latestReading?.value ?? null,
+        latestDate: item.measures?.[0]?.latestReading?.dateTime ?? null,
+        unit: item.measures?.[0]?.unitName || "m",
+      });
+    }
+  }
+
+  const filteredStations = stations
+    .filter(s => s.lat !== 0)
+    .filter(s => isInsideConstituency(s.lng, s.lat, constituencySlug));
+
+  return {
+    warnings,
+    stations: filteredStations,
+    activeWarnings: warnings.filter(w => w.severityLevel <= 3).length,
+    source: "Environment Agency",
+  };
+}
+
+async function fetchAndUpdateCache(
+  centerLat: number,
+  centerLng: number,
+  constituencySlug: string,
+  cacheDocRef: DocumentReference
+) {
   try {
-    const [warningsRes, stationsRes] = await Promise.allSettled([
-      fetch(`${EA_API}/id/floods?lat=${CENTER_LAT}&long=${CENTER_LNG}&dist=${RADIUS_KM}`, {
-        headers: { Accept: "application/json" },
-      }),
-      fetch(`${EA_API}/id/stations?lat=${CENTER_LAT}&long=${CENTER_LNG}&dist=${RADIUS_KM}&_limit=20`, {
-        headers: { Accept: "application/json" },
-      }),
-    ]);
+    const freshData = await generateFreshData(centerLat, centerLng, constituencySlug);
 
-    const warnings: FloodWarning[] = [];
-    const stations: MonitoringStation[] = [];
-
-    if (warningsRes.status === "fulfilled" && warningsRes.value.ok) {
-      const data = await warningsRes.value.json();
-      for (const item of data.items || []) {
-        warnings.push({
-          id: item["@id"] || "",
-          description: item.description || "",
-          severity: item.severityLevel
-            ? ["", "Severe", "Warning", "Alert", "No Longer"][item.severityLevel] || "Unknown"
-            : "Unknown",
-          severityLevel: item.severityLevel || 0,
-          message: item.message || "",
-          timeRaised: item.timeRaised || "",
-          area: item.floodArea?.label || item.eaAreaName || "",
-        });
-      }
-    }
-
-    if (stationsRes.status === "fulfilled" && stationsRes.value.ok) {
-      const data = await stationsRes.value.json();
-      for (const item of data.items || []) {
-        stations.push({
-          id: item["@id"] || "",
-          label: item.label || "",
-          lat: item.lat || 0,
-          lng: item.long || 0,
-          river: item.riverName || "",
-          type: item.measures?.[0]?.parameterName || "Level",
-          latestValue: item.measures?.[0]?.latestReading?.value ?? null,
-          latestDate: item.measures?.[0]?.latestReading?.dateTime ?? null,
-          unit: item.measures?.[0]?.unitName || "m",
-        });
-      }
-    }
-
-    const filteredStations = stations
-      .filter(s => s.lat !== 0)
-      .filter(s => isInsideConstituency(s.lng, s.lat));
-
-    const freshData = {
-      warnings,
-      stations: filteredStations,
-      activeWarnings: warnings.filter(w => w.severityLevel <= 3).length,
-      source: "Environment Agency",
-    };
-
-    const existing = await getDoc(cacheDoc);
+    const existing = await getDoc(cacheDocRef);
     const existingData = existing.exists() ? existing.data().data : null;
 
     if (existingData && JSON.stringify(existingData) === JSON.stringify(freshData)) {
       return;
     }
 
-    await setDoc(cacheDoc, {
+    await setDoc(cacheDocRef, {
       data: freshData,
       updated_at: new Date().toISOString(),
     });
-
   } catch (err) {
     console.error("Background cache update failed:", err);
   }
@@ -113,80 +133,49 @@ async function fetchAndUpdateCache() {
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const forceRefresh = searchParams.get("refresh") === "true";
+  const constituencySlug = searchParams.get("constituency") || "braintree";
+  const constituencyData = getFullData(constituencySlug);
+
+  if (!constituencyData) {
+    return Response.json(
+      { error: "Invalid constituency slug" },
+      { status: 400 }
+    );
+  }
+
+  const CENTER_LAT = constituencyData.geo?.lat;
+  const CENTER_LNG = constituencyData.geo?.lng;
+
+  if (CENTER_LAT == null || CENTER_LNG == null) {
+    return Response.json(
+      {
+        error: "Floods data not available",
+        message: "Geographic center not yet sourced for this constituency",
+        constituency: constituencySlug,
+      },
+      { status: 400 }
+    );
+  }
+
+  const cacheDocRef = doc(db, "flood_cache", constituencySlug);
 
   try {
-    const snap = await getDoc(cacheDoc);
+    const snap = await getDoc(cacheDocRef);
     const cached = snap.exists() ? snap.data() : null;
 
     if (cached && !forceRefresh) {
-      fetchAndUpdateCache();
+      fetchAndUpdateCache(CENTER_LAT, CENTER_LNG, constituencySlug, cacheDocRef);
       return NextResponse.json({ ...cached.data, source: "cache" });
     }
 
-    const [warningsRes, stationsRes] = await Promise.allSettled([
-      fetch(`${EA_API}/id/floods?lat=${CENTER_LAT}&long=${CENTER_LNG}&dist=${RADIUS_KM}`, {
-        headers: { Accept: "application/json" },
-      }),
-      fetch(`${EA_API}/id/stations?lat=${CENTER_LAT}&long=${CENTER_LNG}&dist=${RADIUS_KM}&_limit=20`, {
-        headers: { Accept: "application/json" },
-      }),
-    ]);
+    const freshData = await generateFreshData(CENTER_LAT, CENTER_LNG, constituencySlug);
 
-    const warnings: FloodWarning[] = [];
-    const stations: MonitoringStation[] = [];
-
-    if (warningsRes.status === "fulfilled" && warningsRes.value.ok) {
-      const data = await warningsRes.value.json();
-      for (const item of data.items || []) {
-        warnings.push({
-          id: item["@id"] || "",
-          description: item.description || "",
-          severity: item.severityLevel
-            ? ["", "Severe", "Warning", "Alert", "No Longer"][item.severityLevel] || "Unknown"
-            : "Unknown",
-          severityLevel: item.severityLevel || 0,
-          message: item.message || "",
-          timeRaised: item.timeRaised || "",
-          area: item.floodArea?.label || item.eaAreaName || "",
-        });
-      }
-    }
-
-    if (stationsRes.status === "fulfilled" && stationsRes.value.ok) {
-      const data = await stationsRes.value.json();
-      for (const item of data.items || []) {
-        stations.push({
-          id: item["@id"] || "",
-          label: item.label || "",
-          lat: item.lat || 0,
-          lng: item.long || 0,
-          river: item.riverName || "",
-          type: item.measures?.[0]?.parameterName || "Level",
-          latestValue: item.measures?.[0]?.latestReading?.value ?? null,
-          latestDate: item.measures?.[0]?.latestReading?.dateTime ?? null,
-          unit: item.measures?.[0]?.unitName || "m",
-        });
-      }
-    }
-
-    const filteredStations = stations
-      .filter(s => s.lat !== 0)
-      .filter(s => isInsideConstituency(s.lng, s.lat));
-
-    const freshData = {
-      warnings,
-      stations: filteredStations,
-      activeWarnings: warnings.filter(w => w.severityLevel <= 3).length,
-      source: "Environment Agency",
-    };
-
-    await setDoc(cacheDoc, {
+    await setDoc(cacheDocRef, {
       data: freshData,
       updated_at: new Date().toISOString(),
     });
 
     return NextResponse.json(freshData);
-
   } catch (err) {
     console.error("Flood monitoring error:", err);
     return NextResponse.json(
