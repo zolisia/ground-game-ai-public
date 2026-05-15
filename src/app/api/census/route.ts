@@ -340,16 +340,35 @@ export async function GET(request: Request) {
 
   // Try data-layer ward codes, fall back to Braintree's hardcoded list.
   // ~107 non-English constituencies (Scotland/Wales/NI) have no ward data in
-  // the layer today — return a clean 400 for those.
+  // the layer today — return a clean 400 for those. Empty `wards: []` is
+  // treated the same as `wards: undefined`; without this, the route would
+  // proceed with zero wards and crash downstream on `wardData[0]` in reduce.
+  const wardCodesFromData = constituencyData.areas?.wards?.map(w => w.code);
   const WARD_CODES =
-    constituencyData.areas?.wards?.map(w => w.code) ??
-    (constituencySlug === "braintree" ? BRAINTREE_WARD_CODES : null);
+    wardCodesFromData && wardCodesFromData.length > 0
+      ? wardCodesFromData
+      : (constituencySlug === "braintree" ? BRAINTREE_WARD_CODES : null);
 
   if (!WARD_CODES) {
     return Response.json(
       {
         error: "Census data not available",
-        message: "Ward data not yet sourced for this constituency",
+        message: "Ward-level data not yet sourced for this constituency",
+        constituency: constituencySlug,
+      },
+      { status: 400 }
+    );
+  }
+
+  // ONS Census 2021 only covers England (E05…) and Wales (W05…). Scottish
+  // (S05…) and Northern Irish (N…) wards are valid GSS codes but produce
+  // empty ONS responses, which downstream becomes a generic 500. Reject at
+  // the gate instead.
+  if (!WARD_CODES.some(code => code.startsWith("E05") || code.startsWith("W05"))) {
+    return Response.json(
+      {
+        error: "Census data not available",
+        message: "ONS Census 2021 covers England & Wales only",
         constituency: constituencySlug,
       },
       { status: 400 }

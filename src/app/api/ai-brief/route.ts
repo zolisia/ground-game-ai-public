@@ -110,8 +110,17 @@ function summariseData(data: unknown, type: string): string {
       return items.slice(0, 10).map(i => `- ${i.title || "Untitled"} (${i.source || "unknown"})`).join("\n") || "No headlines";
     }
     if (type === "crime") {
-      const summary = d.summary as Record<string, number> | undefined;
-      if (summary) return Object.entries(summary).map(([k, v]) => `- ${k}: ${v}`).join("\n");
+      // /api/crime returns summary as Array<{category, count}>, not a
+      // Record<string, number>. Interpolating the object directly produced
+      // `- 0: [object Object]` rows, which the AI flagged as corrupted data.
+      const summary = d.summary as Array<{ category?: string; count?: number }> | undefined;
+      if (Array.isArray(summary) && summary.length > 0) {
+        const lines = summary
+          .map(s => `- ${s.category ?? "Unknown"}: ${s.count ?? 0}`)
+          .join("\n");
+        const total = typeof d.total === "number" ? `\n(Total: ${d.total})` : "";
+        return lines + total;
+      }
       const crimes = (d.crimes || []) as Array<{ category?: string }>;
       return `${crimes.length} total crimes reported`;
     }

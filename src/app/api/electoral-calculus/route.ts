@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getFullData } from "@/data";
 
 // Electoral Calculus scraper for constituency prediction data
 // Scrapes ward-level MRP estimates and constituency predictions
@@ -65,27 +66,76 @@ function strip(s: string): string {
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const type = searchParams.get("type") || "seat"; // "seat" | "national" | "both"
-  const seat = searchParams.get("seat") || searchParams.get("constituency") || "braintree";
+
+  // National-only request doesn't need a seat name — short-circuit before
+  // any constituency lookup.
+  if (type === "national") {
+    try {
+      const national = await fetchNationalProjection();
+      return NextResponse.json(national);
+    } catch (err) {
+      return NextResponse.json(
+        { error: "Scraper error", detail: String(err) },
+        { status: 500 }
+      );
+    }
+  }
+
+  // EC's seat parameter is case-sensitive Title Case with `+` for spaces
+  // (e.g. `Witham`, `Cities+of+London+and+Westminster`). The constituency
+  // slug ("witham") returns EC's "Seat not found" page (~680 bytes), which
+  // previously fell through as an empty result. Map slug → EC name via the
+  // data layer. `?seat=` is an escape-hatch for callers who already know the
+  // exact EC name (used in legacy URLs and for the handful of constituencies
+  // where EC's name differs from ONS/Parliament's, e.g. `Mid Bedfordshire`).
+  const explicitSeat = searchParams.get("seat");
+  const constituencySlug = searchParams.get("constituency") || "braintree";
+
+  let ecSeatName: string;
+  if (explicitSeat) {
+    ecSeatName = explicitSeat;
+  } else {
+    const constituencyData = getFullData(constituencySlug);
+    if (!constituencyData) {
+      return Response.json(
+        { error: "Invalid constituency slug" },
+        { status: 400 }
+      );
+    }
+    ecSeatName = constituencyData.constituency.name;
+  }
 
   try {
-    if (type === "national" || type === "both") {
+    if (type === "both") {
       const national = await fetchNationalProjection();
-      if (type === "national") {
-        return NextResponse.json(national);
-      }
-      const constituency = await fetchConstituency(seat);
+      const constituency = await fetchConstituency(ecSeatName);
       return NextResponse.json({ national, constituency });
     }
 
-    const data = await fetchConstituency(seat);
+    const data = await fetchConstituency(ecSeatName);
     return NextResponse.json(data);
   } catch (err) {
+    // EC returns 200 with an HTML error page when the seat name isn't in
+    // their list (parseConstituency throws SeatNotFoundError in that case).
+    // Surface that as a 400 rather than a generic 500.
+    if (err instanceof SeatNotFoundError) {
+      return NextResponse.json(
+        {
+          error: "Electoral Calculus data not available",
+          message: `Electoral Calculus does not recognise the seat name "${ecSeatName}". Their internal name may differ from the ONS/Parliament name — pass the exact EC name via ?seat=…`,
+          constituency: constituencySlug,
+        },
+        { status: 400 }
+      );
+    }
     return NextResponse.json(
       { error: "Scraper error", detail: String(err) },
       { status: 500 }
     );
   }
 }
+
+class SeatNotFoundError extends Error {}
 
 // ═══════════════════════════════════════════════════
 // NATIONAL SEAT PROJECTION (MRP)
@@ -279,6 +329,8 @@ function getFallbackNationalProjection(): NationalProjection {
 // ═══════════════════════════════════════════════════
 
 async function fetchConstituency(seat: string): Promise<ConstituencyPrediction> {
+  // EC accepts both `+` and `%20` for spaces; encodeURIComponent emits `%20`
+  // which works for the script-side decoder.
   const url = `https://www.electoralcalculus.co.uk/fcgi-bin/seatdetails.py?seat=${encodeURIComponent(seat)}`;
   const res = await fetch(url, {
     next: { revalidate: 86400 },
@@ -290,6 +342,14 @@ async function fetchConstituency(seat: string): Promise<ConstituencyPrediction> 
   }
 
   const html = await res.text();
+
+  // EC returns 200 + ~680-byte error page when the seat name isn't in their
+  // list. Detect by the distinctive error marker and the absence of the
+  // SeatCode JS variable that real seat pages embed.
+  if (html.includes("Error message from code") || !html.includes("var SeatCode")) {
+    throw new SeatNotFoundError(`EC has no seat named "${seat}"`);
+  }
+
   return parseConstituency(html, seat);
 }
 

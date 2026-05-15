@@ -85,7 +85,18 @@ export async function GET(request: Request) {
   // Sort by date, newest first
   allItems.sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime());
 
-  return NextResponse.json({ items: allItems.slice(0, 20) });
+  // De-duplicate by link. Sort runs first so the newest entry for a given URL
+  // wins; items without a link (link === "#") fall back to title-based dedup
+  // so we don't collapse every link-less item into one.
+  const seen = new Set<string>();
+  const deduped = allItems.filter((item) => {
+    const key = item.link && item.link !== "#" ? item.link : `title:${item.title}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  return NextResponse.json({ items: deduped.slice(0, 20) });
 }
 
 function parseRSS(xml: string, source: string): FeedItem[] {
