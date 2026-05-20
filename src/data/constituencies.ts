@@ -20,6 +20,12 @@ export interface Constituency {
     winner: string;
     majority: number;
   };
+  // NOMIS wpca24 geography code (Westminster Parliamentary Constituency 2024).
+  // Used by /api/universal-credit and /api/commons-library NOMIS endpoints.
+  // Format: `721419226 + ONS_E14_numeric_suffix` (e.g. E14001121 → 721420347).
+  // Currently sourced for selected constituencies only — routes return a clean
+  // 400 when missing.
+  wpca24Code?: string;
 }
 
 export const CONSTITUENCIES: Constituency[] = [
@@ -139,7 +145,7 @@ export const CONSTITUENCIES: Constituency[] = [
   { name: "Chorley", slug: "chorley", onsCode: "E14001170", mp: "Sir Lindsay Hoyle", party: "Speaker", memberId: 467, constituencyId: 3985, region: "North West", county: "Lancashire", electorate: 74575, results2024: { con: 0, lab: 25238, ld: 0, reform: 0, green: 4663, conShare: 0, labShare: 74.3, ldShare: 0, reformShare: 0, greenShare: 13.7, totalVotes: 33964, turnoutPct: 45.5, winner: "Lab", majority: 20575 } },
   { name: "Christchurch", slug: "christchurch", onsCode: "E14001171", mp: "Sir Christopher Chope", party: "Conservative", memberId: 242, constituencyId: 3986, region: "South West", county: "Dorset", electorate: 71064, results2024: { con: 16941, lab: 7762, ld: 9486, reform: 8961, green: 1900, conShare: 35.8, labShare: 16.4, ldShare: 20, reformShare: 18.9, greenShare: 4, totalVotes: 47335, turnoutPct: 66.6, winner: "Con", majority: 7455 } },
   { name: "Cities of London and Westminster", slug: "cities-of-london-and-westminster", onsCode: "E14001172", mp: "Rachel Blake", party: "Labour (Co-op)", memberId: 5257, constituencyId: 3987, region: "London", county: "City of Westminster", electorate: 73369, results2024: { con: 12594, lab: 15302, ld: 4335, reform: 2752, green: 2844, conShare: 32.1, labShare: 39, ldShare: 11.1, reformShare: 7, greenShare: 7.3, totalVotes: 39215, turnoutPct: 53.4, winner: "Lab", majority: 2708 } },
-  { name: "Clacton", slug: "clacton", onsCode: "E14001174", mp: "Nigel Farage", party: "Reform UK", memberId: 5091, constituencyId: 3989, region: "East of England", county: "Essex", electorate: 78703, results2024: { con: 12820, lab: 7448, ld: 2016, reform: 21225, green: 1935, conShare: 27.9, labShare: 16.2, ldShare: 4.4, reformShare: 46.2, greenShare: 4.2, totalVotes: 45958, turnoutPct: 58.4, winner: "Reform", majority: 8405 } },
+  { name: "Clacton", slug: "clacton", onsCode: "E14001174", mp: "Nigel Farage", party: "Reform UK", memberId: 5091, constituencyId: 3989, region: "East of England", county: "Essex", electorate: 78703, results2024: { con: 12820, lab: 7448, ld: 2016, reform: 21225, green: 1935, conShare: 27.9, labShare: 16.2, ldShare: 4.4, reformShare: 46.2, greenShare: 4.2, totalVotes: 45958, turnoutPct: 58.4, winner: "Reform", majority: 8405 }, wpca24Code: "721420400" },
   { name: "Clapham and Brixton Hill", slug: "clapham-and-brixton-hill", onsCode: "E14001175", mp: "Bell Ribeiro-Addy", party: "Labour", memberId: 4764, constituencyId: 3990, region: "London", county: "Lambeth", electorate: 74435, results2024: { con: 4360, lab: 24166, ld: 6161, reform: 1758, green: 5768, conShare: 10.2, labShare: 56.5, ldShare: 14.4, reformShare: 4.1, greenShare: 13.5, totalVotes: 42741, turnoutPct: 57.4, winner: "Lab", majority: 18005 } },
   { name: "Colchester", slug: "colchester", onsCode: "E14001176", mp: "Pam Cox", party: "Labour", memberId: 5042, constituencyId: 3991, region: "East of England", county: "Essex", electorate: 78662, results2024: { con: 10554, lab: 18804, ld: 6393, reform: 6664, green: 2414, conShare: 23.5, labShare: 41.9, ldShare: 14.2, reformShare: 14.8, greenShare: 5.4, totalVotes: 44903, turnoutPct: 57.1, winner: "Lab", majority: 8250 } },
   { name: "Colne Valley", slug: "colne-valley", onsCode: "E14001177", mp: "Paul Davies", party: "Labour", memberId: 5317, constituencyId: 3992, region: "Yorkshire and the Humber", county: "West Yorkshire", electorate: 72638, results2024: { con: 14007, lab: 18970, ld: 2007, reform: 7298, green: 3480, conShare: 30.3, labShare: 41, ldShare: 4.3, reformShare: 15.8, greenShare: 7.5, totalVotes: 46221, turnoutPct: 63.6, winner: "Lab", majority: 4963 } },

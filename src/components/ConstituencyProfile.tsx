@@ -1,16 +1,42 @@
 "use client";
 
-import { constituencyProfile } from "@/data/braintree";
 import { MapPin, User, Building2, Users } from "lucide-react";
+import { useConstituency } from "@/hooks/useConstituency";
+import { getFullData } from "@/data";
+import { constituencyProfile as braintreeProfile } from "@/data/braintree";
 
 export default function ConstituencyProfile() {
-  const p = constituencyProfile;
+  const { slug } = useConstituency();
+  const data = getFullData(slug);
+
+  if (!data) {
+    return (
+      <div className="p-4 text-[11px] text-zinc-500">
+        Constituency data not available.
+      </div>
+    );
+  }
+
+  const mpName = data.mp?.name ?? data.constituency.mp;
+  const party = data.constituency.party;
+  const electorate = data.constituency.electorate;
+  // Population isn't sourced per-constituency yet — only Braintree has a real
+  // figure from the static profile. Show "—" for others until sourced.
+  const population = slug === "braintree" ? braintreeProfile.population : null;
+
+  const localAuthorities = (data.areas?.lads ?? []).map((lad) => lad.name);
+  const region = data.constituency.region;
+  const county = data.constituency.county;
 
   const stats = [
-    { icon: <User className="h-3.5 w-3.5" />, label: "MP", value: p.mp },
-    { icon: <Building2 className="h-3.5 w-3.5" />, label: "Party", value: p.party },
-    { icon: <Users className="h-3.5 w-3.5" />, label: "Population", value: p.population.toLocaleString() },
-    { icon: <MapPin className="h-3.5 w-3.5" />, label: "Electorate", value: p.electorate.toLocaleString() },
+    { icon: <User className="h-3.5 w-3.5" />, label: "MP", value: mpName },
+    { icon: <Building2 className="h-3.5 w-3.5" />, label: "Party", value: party },
+    {
+      icon: <Users className="h-3.5 w-3.5" />,
+      label: "Population",
+      value: population != null ? population.toLocaleString() : "—",
+    },
+    { icon: <MapPin className="h-3.5 w-3.5" />, label: "Electorate", value: electorate.toLocaleString() },
   ];
 
   return (
@@ -27,7 +53,7 @@ export default function ConstituencyProfile() {
         ))}
       </div>
       <div className="mt-3 flex flex-wrap gap-1.5">
-        {p.localAuthorities.map((la) => (
+        {localAuthorities.map((la) => (
           <span
             key={la}
             className="text-[11px] bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded-full"
@@ -35,12 +61,16 @@ export default function ConstituencyProfile() {
             {la}
           </span>
         ))}
-        <span className="text-[11px] bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded-full">
-          {p.region}
-        </span>
-        <span className="text-[11px] bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded-full">
-          {p.area}
-        </span>
+        {region && (
+          <span className="text-[11px] bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded-full">
+            {region}
+          </span>
+        )}
+        {county && (
+          <span className="text-[11px] bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded-full">
+            {county}
+          </span>
+        )}
       </div>
     </div>
   );

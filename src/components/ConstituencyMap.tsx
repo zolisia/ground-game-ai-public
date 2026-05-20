@@ -31,6 +31,42 @@ const LAYER_DEFS: LayerDef[] = [
   { id: "ward-labels", label: "Ward Names", emoji: "🏷️", description: "Ward name labels", default: true },
 ];
 
+interface BoundaryFeature {
+  type: "Feature";
+  geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon;
+  properties: { PCON24CD: string; PCON24NM: string };
+}
+interface BoundaryCollection {
+  type: "FeatureCollection";
+  features: BoundaryFeature[];
+}
+
+// Module-scope cache for the full 650-constituency GeoJSON so we don't
+// re-fetch + re-parse 21 MB on every slug switch. Returns a FeatureCollection
+// containing just the requested constituency, or null if not found.
+let allBoundariesPromise: Promise<BoundaryCollection> | null = null;
+function loadAllBoundaries(): Promise<BoundaryCollection> {
+  if (!allBoundariesPromise) {
+    allBoundariesPromise = fetch("/geojson/constituencies-all.geojson")
+      .then((res) => {
+        if (!res.ok) throw new Error(`constituencies-all.geojson: ${res.status}`);
+        return res.json();
+      });
+  }
+  return allBoundariesPromise;
+}
+async function loadConstituencyBoundary(onsCode: string): Promise<BoundaryCollection | null> {
+  try {
+    const all = await loadAllBoundaries();
+    const feature = all.features.find((f) => f.properties?.PCON24CD === onsCode);
+    if (!feature) return null;
+    return { type: "FeatureCollection", features: [feature] };
+  } catch (err) {
+    console.error("Failed to load constituency boundary:", err);
+    return null;
+  }
+}
+
 interface FMSIssue {
   id: string;
   title: string;
@@ -112,12 +148,14 @@ export default function ConstituencyMap() {
 
     m.on("load", async () => {
       try {
-        // Fetch GeoJSON and live EC data in parallel.
-        // TODO: per-constituency boundary GeoJSON. We have constituencies-all.geojson
-        // (21MB) loaded by src/lib/geo.ts — could extract feature by ONS code here.
+        // Fetch boundary, wards and live EC data in parallel.
+        // Boundary works for any constituency — extracted from the cached
+        // 21MB constituencies-all.geojson by ONS code. Ward layers are still
+        // Braintree-only until per-constituency ward GeoJSON is sourced.
+        const onsCode = data?.constituency.onsCode;
         const isBraintree = slug === "braintree";
-        const [constituencyRes, wardsRes, ecRes] = await Promise.all([
-          isBraintree ? fetch("/geojson/braintree-constituency.geojson") : Promise.resolve(null),
+        const [constituencyData, wardsRes, ecRes] = await Promise.all([
+          onsCode ? loadConstituencyBoundary(onsCode) : Promise.resolve(null),
           isBraintree ? fetch("/geojson/braintree-wards.geojson") : Promise.resolve(null),
           fetch(withConstituency("/api/electoral-calculus?type=seat", slug)).catch(() => null),
         ]);
@@ -147,10 +185,27 @@ export default function ConstituencyMap() {
           // Keep fallback wardElectoralCalc
         }
 
-        // Boundary + wards setup runs only when we have the static Braintree GeoJSON.
-        // TODO: per-constituency boundary/ward GeoJSON for non-Braintree seats.
-        if (constituencyRes && wardsRes) {
-        const constituencyData = await constituencyRes.json();
+        // Boundary works for any constituency now. Wards still depend on the
+        // Braintree-specific GeoJSON + static per-ward vote data — TODO when
+        // per-constituency ward data is sourced.
+        if (constituencyData) {
+        // === BOUNDARY SOURCE + LAYERS (universal) ===
+        m.addSource("constituency", { type: "geojson", data: constituencyData });
+        m.addLayer({
+          id: "boundary-fill",
+          type: "fill",
+          source: "constituency",
+          paint: { "fill-color": "#10b981", "fill-opacity": 0.05 },
+        });
+        m.addLayer({
+          id: "boundary-outline",
+          type: "line",
+          source: "constituency",
+          paint: { "line-color": "#10b981", "line-width": 2.5, "line-dasharray": [3, 2] },
+        });
+
+        // === WARD SOURCE + LAYERS (Braintree-only for now) ===
+        if (wardsRes) {
         const wardsData = await wardsRes.json();
 
         // Enrich ward features
@@ -184,23 +239,7 @@ export default function ConstituencyMap() {
           feature.properties.name = wardName;
         }
 
-        // === SOURCES ===
-        m.addSource("constituency", { type: "geojson", data: constituencyData });
         m.addSource("wards", { type: "geojson", data: wardsData });
-
-        // === LAYER: Constituency Boundary ===
-        m.addLayer({
-          id: "boundary-fill",
-          type: "fill",
-          source: "constituency",
-          paint: { "fill-color": "#10b981", "fill-opacity": 0.05 },
-        });
-        m.addLayer({
-          id: "boundary-outline",
-          type: "line",
-          source: "constituency",
-          paint: { "line-color": "#10b981", "line-width": 2.5, "line-dasharray": [3, 2] },
-        });
 
         // === LAYER: Ward 2024 Vote Choropleth ===
         m.addLayer({
@@ -348,8 +387,9 @@ export default function ConstituencyMap() {
           m.on("mouseenter", layerId, () => { m.getCanvas().style.cursor = "pointer"; });
           m.on("mouseleave", layerId, () => { m.getCanvas().style.cursor = ""; });
         }
+        } // end if (wardsRes)
 
-        // Fit to constituency bounds
+        // Fit to constituency bounds (works for any constituency)
         const geom = constituencyData.features?.[0]?.geometry;
         if (geom) {
           const bounds = new maplibregl.LngLatBounds();
@@ -357,7 +397,7 @@ export default function ConstituencyMap() {
           for (const coord of coords) bounds.extend(coord as [number, number]);
           m.fitBounds(bounds, { padding: 40 });
         }
-        } // end if (constituencyRes && wardsRes)
+        } // end if (constituencyData)
 
         // Load FixMyStreet data for markers
         try {

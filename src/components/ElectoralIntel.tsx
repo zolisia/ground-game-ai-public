@@ -2,17 +2,107 @@
 
 import { useEffect, useState } from "react";
 import {
-  electionResults2024,
   ecPrediction as fallbackEcPrediction,
   wardElectoralCalc as fallbackWardElectoralCalc,
 } from "@/data/braintree";
 import { useConstituency, withConstituency } from "@/hooks/useConstituency";
+import { getFullData } from "@/data";
 
 type View = "results" | "prediction" | "wards";
 
 const partyColors: Record<string, string> = {
   CON: "#0087DC", LAB: "#DC241f", Reform: "#12B6CF", LIB: "#FAA61A", Green: "#6AB023", OTH: "#999",
 };
+
+// The data-layer candidate `party` field uses long form (e.g. "Conservative
+// and Unionist Party"). Map to the short display labels + colours the UI uses.
+// Anything unmapped falls into "Other".
+interface PartyMeta { label: string; color: string; }
+function partyMeta(longName: string): PartyMeta {
+  const n = longName.toLowerCase();
+  if (n.includes("conservative")) return { label: "Conservative", color: "#0087DC" };
+  if (n.includes("labour")) return { label: "Labour", color: "#DC241f" };
+  if (n.includes("reform")) return { label: "Reform UK", color: "#12B6CF" };
+  if (n.includes("liberal democrat")) return { label: "Liberal Democrats", color: "#FAA61A" };
+  if (n.includes("green")) return { label: "Green", color: "#6AB023" };
+  if (n.includes("plaid")) return { label: "Plaid Cymru", color: "#005B54" };
+  if (n.includes("snp") || n.includes("scottish national")) return { label: "SNP", color: "#FDF38E" };
+  return { label: longName, color: "#999999" };
+}
+
+interface ResultRow {
+  party: string;        // short display name
+  candidate: string;    // real candidate name from data layer, or "<Party> Candidate" fallback
+  votes: number;
+  percentage: number;
+  color: string;
+}
+
+interface DerivedResults {
+  year: number;
+  turnout: number;      // percentage
+  majority: number;     // percentage (winner share - runner-up share)
+  electorate: number;
+  results: ResultRow[];
+}
+
+// Build the 2024 results view from the data layer for the active constituency.
+// Top 5 by votes shown individually; the rest are grouped as "Other".
+function deriveResults(slug: string): DerivedResults | null {
+  const data = getFullData(slug);
+  if (!data) return null;
+  const candidates = data.candidates ?? [];
+  const r2024 = data.constituency.results2024;
+
+  if (candidates.length === 0) {
+    return {
+      year: 2024,
+      turnout: r2024.turnoutPct,
+      majority: 0,
+      electorate: data.constituency.electorate,
+      results: [],
+    };
+  }
+
+  const sorted = [...candidates].sort((a, b) => b.votes - a.votes);
+  const top = sorted.slice(0, 5);
+  const rest = sorted.slice(5);
+
+  const rows: ResultRow[] = top.map((c) => {
+    const meta = partyMeta(c.party);
+    return {
+      party: meta.label,
+      candidate: c.name,
+      votes: c.votes,
+      percentage: c.share,
+      color: meta.color,
+    };
+  });
+
+  if (rest.length > 0) {
+    const otherVotes = rest.reduce((sum, c) => sum + c.votes, 0);
+    const otherShare = rest.reduce((sum, c) => sum + c.share, 0);
+    rows.push({
+      party: "Other",
+      candidate: `${rest.length} candidate${rest.length === 1 ? "" : "s"}`,
+      votes: otherVotes,
+      percentage: Math.round(otherShare * 10) / 10,
+      color: "#999999",
+    });
+  }
+
+  const winner = sorted[0];
+  const runnerUp = sorted[1];
+  const majorityPct = runnerUp ? Math.round((winner.share - runnerUp.share) * 10) / 10 : winner.share;
+
+  return {
+    year: 2024,
+    turnout: r2024.turnoutPct,
+    majority: majorityPct,
+    electorate: data.constituency.electorate,
+    results: rows,
+  };
+}
 
 interface ECConstituencyData {
   prediction: string;
@@ -55,6 +145,7 @@ function toLiveWardData(wards: ECConstituencyData["wards"]): Record<string, { el
 
 export default function ElectoralIntel() {
   const { slug } = useConstituency();
+  const results2024 = deriveResults(slug);
   const [view, setView] = useState<View>("results");
   const [ecPrediction, setEcPrediction] = useState<{
     prediction: string;
@@ -122,32 +213,46 @@ export default function ElectoralIntel() {
       {/* 2024 Results */}
       {view === "results" && (
         <div className="p-4 space-y-3">
-          <div className="flex justify-between text-xs text-zinc-500">
-            <span>General Election {electionResults2024.year}</span>
-            <span>Turnout: {electionResults2024.turnout}%</span>
-          </div>
-          <div className="space-y-2">
-            {electionResults2024.results.map((r) => (
-              <div key={r.party}>
-                <div className="flex items-center justify-between mb-0.5">
-                  <div className="flex items-center gap-2">
-                    <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: r.color }} />
-                    <span className="text-[12px] text-zinc-300">{r.party}</span>
-                  </div>
-                  <span className="text-[12px] font-medium text-zinc-200">{r.percentage}%</span>
-                </div>
-                <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
-                  <div className="h-full rounded-full" style={{ width: `${r.percentage}%`, backgroundColor: r.color }} />
-                </div>
-                <div className="text-[10px] text-zinc-600 mt-0.5">
-                  {r.candidate} · {r.votes.toLocaleString()} votes
-                </div>
+          {!results2024 ? (
+            <div className="text-[11px] text-zinc-500 text-center py-8">
+              2024 results not available for this constituency.
+            </div>
+          ) : (
+            <>
+              <div className="flex justify-between text-xs text-zinc-500">
+                <span>General Election {results2024.year}</span>
+                <span>Turnout: {results2024.turnout}%</span>
               </div>
-            ))}
-          </div>
-          <div className="text-[10px] text-zinc-600 text-center">
-            Majority: {electionResults2024.majority}% · Electorate: {(77781).toLocaleString()}
-          </div>
+              {results2024.results.length === 0 ? (
+                <div className="text-[11px] text-zinc-500 text-center py-4">
+                  Candidate data not yet sourced for this constituency.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {results2024.results.map((r) => (
+                    <div key={r.party}>
+                      <div className="flex items-center justify-between mb-0.5">
+                        <div className="flex items-center gap-2">
+                          <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: r.color }} />
+                          <span className="text-[12px] text-zinc-300">{r.party}</span>
+                        </div>
+                        <span className="text-[12px] font-medium text-zinc-200">{r.percentage}%</span>
+                      </div>
+                      <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
+                        <div className="h-full rounded-full" style={{ width: `${r.percentage}%`, backgroundColor: r.color }} />
+                      </div>
+                      <div className="text-[10px] text-zinc-600 mt-0.5">
+                        {r.candidate} · {r.votes.toLocaleString()} votes
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="text-[10px] text-zinc-600 text-center">
+                Majority: {results2024.majority}% · Electorate: {results2024.electorate.toLocaleString()}
+              </div>
+            </>
+          )}
         </div>
       )}
 
