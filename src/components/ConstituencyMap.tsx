@@ -67,6 +67,15 @@ async function loadConstituencyBoundary(onsCode: string): Promise<BoundaryCollec
   }
 }
 
+// Per-constituency ward GeoJSON. Each file is a FeatureCollection of the
+// constituency's wards (WD24CD/WD24NM properties, 4326 geometry, sourced from
+// ONS WD_MAY_2024_UK_BGC). For slugs not listed here the ward layers don't
+// render — boundary still does, via constituencies-all.geojson.
+const WARDS_GEOJSON_PATHS: Record<string, string> = {
+  braintree: "/geojson/braintree-wards.geojson",
+  clacton: "/geojson/clacton-wards.geojson",
+};
+
 interface FMSIssue {
   id: string;
   title: string;
@@ -150,13 +159,14 @@ export default function ConstituencyMap() {
       try {
         // Fetch boundary, wards and live EC data in parallel.
         // Boundary works for any constituency — extracted from the cached
-        // 21MB constituencies-all.geojson by ONS code. Ward layers are still
-        // Braintree-only until per-constituency ward GeoJSON is sourced.
+        // 21MB constituencies-all.geojson by ONS code. Ward layers render for
+        // any constituency listed in WARDS_GEOJSON_PATHS; others get boundary
+        // only.
         const onsCode = data?.constituency.onsCode;
-        const isBraintree = slug === "braintree";
+        const wardsPath = WARDS_GEOJSON_PATHS[slug];
         const [constituencyData, wardsRes, ecRes] = await Promise.all([
           onsCode ? loadConstituencyBoundary(onsCode) : Promise.resolve(null),
-          isBraintree ? fetch("/geojson/braintree-wards.geojson") : Promise.resolve(null),
+          wardsPath ? fetch(wardsPath) : Promise.resolve(null),
           fetch(withConstituency("/api/electoral-calculus?type=seat", slug)).catch(() => null),
         ]);
 
@@ -733,15 +743,17 @@ export default function ConstituencyMap() {
         const source = m.getSource("wards") as maplibregl.GeoJSONSource;
         if (!source) return;
 
-        // Census recolour requires the per-ward GeoJSON. We only have it for Braintree.
-        // TODO: per-constituency ward GeoJSON so non-Braintree can recolour too.
-        if (slug !== "braintree") {
+        // Census recolour requires the per-ward GeoJSON. Listed slugs only —
+        // for the rest the census API still returns data but there's nothing
+        // to colour.
+        const wardsPath = WARDS_GEOJSON_PATHS[slug];
+        if (!wardsPath) {
           return;
         }
 
         // We need to get the current data and enrich it
         // Use the wards geojson URL since we can't read from source directly
-        const wardsRes = await fetch("/geojson/braintree-wards.geojson");
+        const wardsRes = await fetch(wardsPath);
         const wardsGeo = await wardsRes.json();
         for (const feature of wardsGeo.features) {
           const code = feature.properties.WD24CD;
