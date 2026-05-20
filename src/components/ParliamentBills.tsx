@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Search, ExternalLink, ThumbsUp, ThumbsDown } from "lucide-react";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 type Tab = "votes" | "bills";
 
@@ -52,6 +53,7 @@ function classifyStage(stage: string): string {
 }
 
 export default function ParliamentBills() {
+  const { slug } = useConstituency();
   const [tab, setTab] = useState<Tab>("votes");
   const [votes, setVotes] = useState<Vote[]>([]);
   const [bills, setBills] = useState<Bill[]>([]);
@@ -59,12 +61,15 @@ export default function ParliamentBills() {
   const [search, setSearch] = useState("");
   const [searching, setSearching] = useState(false);
 
-  useEffect(() => { fetchVotes(); }, []);
+  useEffect(() => {
+    fetchVotes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
 
   async function fetchVotes() {
     try {
       setLoading(true);
-      const res = await fetch("/api/parliament?type=votes");
+      const res = await fetch(withConstituency("/api/parliament?type=votes", slug));
       if (!res.ok) throw new Error("Failed");
       const data = await res.json();
       setVotes(data.votes || []);

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 // Match the actual API response from /api/cqc
 interface LocationResult {
@@ -93,16 +94,17 @@ function formatDate(d: string): string {
 }
 
 export default function CQCPanel() {
+  const { slug } = useConstituency();
   const [data, setData] = useState<CQCData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/cqc")
+    fetch(withConstituency("/api/cqc", slug))
       .then((res) => res.json())
       .then((d: CQCData) => setData(d))
       .catch(() => setData(null))
       .finally(() => setLoading(false));
-  }, []);
+  }, [slug]);
 
   if (loading) {
     return (

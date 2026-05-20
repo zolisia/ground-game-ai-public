@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 export default function AIBrief() {
+  const { slug } = useConstituency();
   const [brief, setBrief] = useState<string>("");
   const [generated, setGenerated] = useState<string>("");
   const [loading, setLoading] = useState(true);
@@ -11,12 +13,13 @@ export default function AIBrief() {
 
   useEffect(() => {
     fetchBrief();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
 
   async function fetchBrief() {
     try {
       setLoading(true);
-      const res = await fetch("/api/ai-brief");
+      const res = await fetch(withConstituency("/api/ai-brief", slug));
       if (!res.ok) throw new Error("Failed");
       const data = await res.json();
       setBrief(data.brief || "");

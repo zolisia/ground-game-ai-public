@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState, useCallback } from "react";
+import { useRouter, usePathname } from "next/navigation";
 import Header, { TabId } from "@/components/Header";
 import Panel from "@/components/Panel";
 import dynamic from "next/dynamic";
+import { useConstituency, type ConstituencySlug } from "@/hooks/useConstituency";
 
 const ConstituencyMap = dynamic(() => import("@/components/ConstituencyMap"), {
   ssr: false,
@@ -65,12 +67,41 @@ import {
   LayoutGrid,
 } from "lucide-react";
 
-export default function Dashboard() {
+export default function DashboardPage() {
+  // useSearchParams must be wrapped in Suspense in the App Router.
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#0a0a0a]" />}>
+      <Dashboard />
+    </Suspense>
+  );
+}
+
+function Dashboard() {
   const [activeTab, setActiveTab] = useState<TabId>("map");
+  const { slug: constituencySlug, name: constituencyName } = useConstituency();
+  const router = useRouter();
+  const pathname = usePathname();
+
+  const handleConstituencyChange = useCallback(
+    (next: ConstituencySlug) => {
+      // Persist selection in URL so the page is shareable. Components read
+      // the slug from URL via the useConstituency hook and will re-fetch
+      // when their useEffect dependencies update.
+      const qs = new URLSearchParams(window.location.search);
+      qs.set("constituency", next);
+      router.replace(`${pathname}?${qs.toString()}`);
+    },
+    [router, pathname]
+  );
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] flex flex-col">
-      <Header activeTab={activeTab} onTabChange={setActiveTab} />
+      <Header
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        constituencySlug={constituencySlug}
+        onConstituencyChange={handleConstituencyChange}
+      />
 
       <main className="flex-1 p-2 lg:p-3">
         <div className="max-w-[1800px] mx-auto">
@@ -89,7 +120,7 @@ export default function Dashboard() {
 
               {/* Profile sidebar */}
               <Panel
-                title="Braintree"
+                title={constituencyName}
                 icon={<Users className="h-3.5 w-3.5" />}
                 className="lg:col-span-4"
               >

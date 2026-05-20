@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ExternalLink, AlertCircle, RefreshCw } from "lucide-react";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 interface OpponentPost {
   text: string;
@@ -36,6 +37,7 @@ const ACTIVITY_INDICATORS: Record<string, { dot: string; label: string }> = {
 };
 
 export default function OppositionTracker() {
+  const { slug } = useConstituency();
   const [data, setData] = useState<OppositionData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -45,7 +47,7 @@ export default function OppositionTracker() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/opposition");
+      const res = await fetch(withConstituency("/api/opposition", slug));
       if (!res.ok) throw new Error("Failed to fetch opposition data");
       const json: OppositionData = await res.json();
       setData(json);
@@ -58,7 +60,8 @@ export default function OppositionTracker() {
 
   useEffect(() => {
     fetchData();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
 
   if (loading) {
     return (

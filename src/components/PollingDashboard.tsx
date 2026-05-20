@@ -16,6 +16,7 @@ import {
   Cell,
 } from "recharts";
 import { TrendingUp, TrendingDown, Minus, ExternalLink } from "lucide-react";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 // Party colors
 const PARTY_COLORS: Record<string, string> = {
@@ -183,6 +184,7 @@ function TrackerTooltip({
 }
 
 export default function PollingDashboard() {
+  const { slug } = useConstituency();
   const [data, setData] = useState<PollingData | null>(null);
   const [ecNational, setEcNational] = useState<ECNational | null>(null);
   const [ecConstituency, setEcConstituency] = useState<ECConstituency | null>(null);
@@ -195,8 +197,8 @@ export default function PollingDashboard() {
       try {
         // Fetch polling data and Electoral Calculus data in parallel
         const [pollingRes, ecRes] = await Promise.allSettled([
-          fetch("/api/polling?type=all"),
-          fetch("/api/electoral-calculus?type=both&seat=Braintree"),
+          fetch(withConstituency("/api/polling?type=all", slug)),
+          fetch(withConstituency("/api/electoral-calculus?type=both", slug)),
         ]);
 
         if (pollingRes.status === "fulfilled" && pollingRes.value.ok) {
@@ -216,7 +218,8 @@ export default function PollingDashboard() {
       }
     }
     fetchAll();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
 
   const sections: { id: Section; label: string }[] = [
     { id: "intention", label: "Vote Intention" },

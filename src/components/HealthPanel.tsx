@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 interface HealthIndicator {
   id: number;
@@ -89,6 +90,7 @@ function ProgressBar({ value, englandAvg, unit, significance }: {
 }
 
 export default function HealthPanel() {
+  const { slug } = useConstituency();
   const [data, setData] = useState<HealthData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -96,7 +98,7 @@ export default function HealthPanel() {
   useEffect(() => {
     async function fetchHealth() {
       try {
-        const res = await fetch("/api/health");
+        const res = await fetch(withConstituency("/api/health", slug));
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json: HealthData = await res.json();
         if (json.error) throw new Error(json.error);
@@ -108,7 +110,8 @@ export default function HealthPanel() {
       }
     }
     fetchHealth();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
 
   if (loading) {
     return (

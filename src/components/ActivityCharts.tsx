@@ -12,6 +12,7 @@ import {
   ResponsiveContainer,
   CartesianGrid,
 } from "recharts";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 type Tab = "mentions" | "parliament" | "votes";
 
@@ -57,6 +58,7 @@ function CustomTooltip({ active, payload, label }: { active?: boolean; payload?:
 }
 
 export default function ActivityCharts() {
+  const { slug } = useConstituency();
   const [tab, setTab] = useState<Tab>("parliament");
   const [mentionData, setMentionData] = useState<MentionDataPoint[]>([]);
   const [parliamentData, setParliamentData] = useState<ParliamentDataPoint[]>([]);
@@ -69,10 +71,10 @@ export default function ActivityCharts() {
       try {
         // Fetch mentions, parliament votes, hansard activity, and written questions in parallel
         const [mentionsRes, parliamentRes, hansardRes, questionsRes] = await Promise.allSettled([
-          fetch("/api/mentions"),
-          fetch("/api/parliament?type=votes"),
-          fetch("/api/hansard?type=speeches"),
-          fetch("/api/hansard?type=questions"),
+          fetch(withConstituency("/api/mentions", slug)),
+          fetch(withConstituency("/api/parliament?type=votes", slug)),
+          fetch(withConstituency("/api/hansard?type=speeches", slug)),
+          fetch(withConstituency("/api/hansard?type=questions", slug)),
         ]);
 
         // Process mentions into daily buckets
@@ -129,7 +131,8 @@ export default function ActivityCharts() {
       }
     }
     fetchData();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "parliament", label: "Parliamentary Activity" },

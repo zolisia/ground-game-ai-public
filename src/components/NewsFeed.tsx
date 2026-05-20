@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ExternalLink } from "lucide-react";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 interface NewsItem {
   title: string;
@@ -12,6 +13,7 @@ interface NewsItem {
 }
 
 export default function NewsFeed() {
+  const { slug } = useConstituency();
   const [items, setItems] = useState<NewsItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -20,7 +22,7 @@ export default function NewsFeed() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/news");
+      const res = await fetch(withConstituency("/api/news", slug));
       if (!res.ok) throw new Error("Failed to fetch news");
       const data = await res.json();
       setItems(data.items || []);
@@ -35,7 +37,8 @@ export default function NewsFeed() {
 
   useEffect(() => {
     fetchNews();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
 
   if (loading) {
     return (

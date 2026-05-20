@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ExternalLink, RefreshCw, AlertCircle, Heart, Repeat2, CheckCircle2 } from "lucide-react";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 interface SocialMention {
   text: string;
@@ -23,6 +24,7 @@ interface MentionsData {
 }
 
 export default function MentionsFeed() {
+  const { slug } = useConstituency();
   const [data, setData] = useState<MentionsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +33,7 @@ export default function MentionsFeed() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/mentions");
+      const res = await fetch(withConstituency("/api/mentions", slug));
       if (!res.ok) throw new Error("Failed to fetch mentions");
       const json: MentionsData = await res.json();
       setData(json);
@@ -44,7 +46,8 @@ export default function MentionsFeed() {
 
   useEffect(() => {
     fetchData();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
 
   if (loading) {
     return (

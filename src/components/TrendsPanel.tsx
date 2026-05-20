@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { TrendingUp, Search, BarChart3 } from "lucide-react";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 // ── Types — match /api/trends-v2 response shape ─────────────────────────────
 
@@ -321,6 +322,7 @@ function UnavailableSection({ height = "py-4" }: { height?: string }) {
 // ── Main Component ──────────────────────────────────────────────────────────
 
 export default function TrendsPanel() {
+  const { slug } = useConstituency();
   const [data, setData] = useState<TrendsV2Data | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -329,7 +331,7 @@ export default function TrendsPanel() {
     let cancelled = false;
     async function fetchTrends() {
       try {
-        const res = await fetch("/api/trends-v2");
+        const res = await fetch(withConstituency("/api/trends-v2", slug));
         if (!res.ok && res.status !== 200) throw new Error("Failed");
         const json = await res.json();
         if (!cancelled) {
@@ -343,7 +345,8 @@ export default function TrendsPanel() {
     }
     fetchTrends();
     return () => { cancelled = true; };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
 
   // Build the two-series time-series chart from interestOverTime.
   // MP series uses CON blue; constituency series uses default green.

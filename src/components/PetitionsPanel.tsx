@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 interface PetitionItem {
   title: string;
@@ -24,16 +25,17 @@ function heatIcon(salience: number, median: number): string {
 }
 
 export default function PetitionsPanel() {
+  const { slug } = useConstituency();
   const [data, setData] = useState<PetitionsData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/petitions")
+    fetch(withConstituency("/api/petitions", slug))
       .then((res) => res.json())
       .then((d: PetitionsData) => setData(d))
       .catch(() => setData(null))
       .finally(() => setLoading(false));
-  }, []);
+  }, [slug]);
 
   if (loading) {
     return (

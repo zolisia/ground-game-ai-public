@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { GraduationCap, ExternalLink, Users, School } from "lucide-react";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 interface SchoolItem {
   name: string;
@@ -42,6 +43,7 @@ const TYPE_GROUPS: { key: SchoolItem["type"]; label: string; icon: string }[] = 
 ];
 
 export default function SchoolsPanel() {
+  const { slug } = useConstituency();
   const [schools, setSchools] = useState<SchoolItem[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -49,12 +51,13 @@ export default function SchoolsPanel() {
 
   useEffect(() => {
     fetchSchools();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
 
   async function fetchSchools() {
     try {
       setLoading(true);
-      const res = await fetch("/api/schools");
+      const res = await fetch(withConstituency("/api/schools", slug));
       if (!res.ok) throw new Error("Failed");
       const data = await res.json();
       setSchools(data.schools || []);

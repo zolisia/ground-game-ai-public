@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle, Clock } from "lucide-react";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 interface Issue {
   id: number | string;
@@ -15,6 +16,7 @@ interface Issue {
 }
 
 export default function FixMyStreet() {
+  const { slug } = useConstituency();
   const [issues, setIssues] = useState<Issue[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>("all");
@@ -22,7 +24,7 @@ export default function FixMyStreet() {
   useEffect(() => {
     async function fetchIssues() {
       try {
-        const res = await fetch("/api/fixmystreet");
+        const res = await fetch(withConstituency("/api/fixmystreet", slug));
         if (!res.ok) throw new Error("Failed to fetch");
         const data = await res.json();
         setIssues(data.issues || []);
@@ -34,7 +36,8 @@ export default function FixMyStreet() {
       }
     }
     fetchIssues();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
 
   const categories = ["all", ...Array.from(new Set(issues.map((i) => i.category)))];
   const filtered = filter === "all" ? issues : issues.filter((i) => i.category === filter);

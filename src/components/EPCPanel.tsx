@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 // Match the actual API response shape from /api/epc
 // ratings is a Record<string, number> like { A: 12, B: 34, C: 56, ... }
@@ -45,16 +46,17 @@ const BAND_TEXT_COLORS: Record<string, string> = {
 const BAND_ORDER = ["A", "B", "C", "D", "E", "F", "G"];
 
 export default function EPCPanel() {
+  const { slug } = useConstituency();
   const [data, setData] = useState<EPCData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/epc")
+    fetch(withConstituency("/api/epc", slug))
       .then((res) => res.json())
       .then((d: EPCData) => setData(d))
       .catch(() => setData(null))
       .finally(() => setLoading(false));
-  }, []);
+  }, [slug]);
 
   if (loading) {
     return (

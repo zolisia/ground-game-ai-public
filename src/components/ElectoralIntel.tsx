@@ -6,6 +6,7 @@ import {
   ecPrediction as fallbackEcPrediction,
   wardElectoralCalc as fallbackWardElectoralCalc,
 } from "@/data/braintree";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 type View = "results" | "prediction" | "wards";
 
@@ -53,6 +54,7 @@ function toLiveWardData(wards: ECConstituencyData["wards"]): Record<string, { el
 }
 
 export default function ElectoralIntel() {
+  const { slug } = useConstituency();
   const [view, setView] = useState<View>("results");
   const [ecPrediction, setEcPrediction] = useState<{
     prediction: string;
@@ -68,7 +70,7 @@ export default function ElectoralIntel() {
   useEffect(() => {
     async function fetchLiveEC() {
       try {
-        const res = await fetch("/api/electoral-calculus?type=seat&seat=Braintree");
+        const res = await fetch(withConstituency("/api/electoral-calculus?type=seat", slug));
         if (!res.ok) return;
         const data: ECConstituencyData = await res.json();
         if (data.prediction && Object.keys(data.predicted).length > 0) {
@@ -86,7 +88,8 @@ export default function ElectoralIntel() {
       }
     }
     fetchLiveEC();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
 
   const tabs: { key: View; label: string }[] = [
     { key: "results", label: "2024 Results" },

@@ -2,6 +2,7 @@
 
 import { Menu, X } from "lucide-react";
 import { useState } from "react";
+import { SELECTABLE_CONSTITUENCIES, type ConstituencySlug } from "@/hooks/useConstituency";
 
 export type TabId = "map" | "political" | "polling" | "demographics" | "local";
 
@@ -16,10 +17,21 @@ const TABS: { id: TabId; label: string }[] = [
 interface HeaderProps {
   activeTab: TabId;
   onTabChange: (tab: TabId) => void;
+  constituencySlug: ConstituencySlug;
+  onConstituencyChange: (slug: ConstituencySlug) => void;
 }
 
-export default function Header({ activeTab, onTabChange }: HeaderProps) {
+export default function Header({
+  activeTab,
+  onTabChange,
+  constituencySlug,
+  onConstituencyChange,
+}: HeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+
+  const activeConstituency = SELECTABLE_CONSTITUENCIES.find(
+    (c) => c.slug === constituencySlug
+  );
 
   return (
     <header className="bg-[#141414] border-b border-[#2a2a2a] sticky top-0 z-50">
@@ -44,9 +56,20 @@ export default function Header({ activeTab, onTabChange }: HeaderProps) {
             <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
             <span className="text-[10px] text-zinc-500 uppercase tracking-wider">Live</span>
           </div>
-          <span className="hidden md:block text-[11px] text-zinc-500 uppercase tracking-wider">
-            Braintree
-          </span>
+          <label className="hidden md:flex items-center gap-1.5">
+            <span className="sr-only">Constituency</span>
+            <select
+              value={constituencySlug}
+              onChange={(e) => onConstituencyChange(e.target.value as ConstituencySlug)}
+              className="bg-[#141414] border border-[#2a2a2a] text-[11px] text-zinc-300 uppercase tracking-wider px-2 py-1 focus:outline-none focus:border-emerald-500 cursor-pointer"
+            >
+              {SELECTABLE_CONSTITUENCIES.map((c) => (
+                <option key={c.slug} value={c.slug}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
           <button
             className="md:hidden text-zinc-400 hover:text-white"
             onClick={() => setMenuOpen(!menuOpen)}
@@ -91,7 +114,26 @@ export default function Header({ activeTab, onTabChange }: HeaderProps) {
               </button>
             ))}
             <div className="mt-2 pt-2 border-t border-[#2a2a2a]">
-              <span className="text-[10px] text-zinc-600">Braintree &middot; James Cleverly (Con)</span>
+              <label className="flex items-center gap-2">
+                <span className="text-[10px] text-zinc-600 uppercase tracking-wider">Constituency</span>
+                <select
+                  value={constituencySlug}
+                  onChange={(e) => {
+                    onConstituencyChange(e.target.value as ConstituencySlug);
+                    setMenuOpen(false);
+                  }}
+                  className="flex-1 bg-[#141414] border border-[#2a2a2a] text-[11px] text-zinc-300 uppercase tracking-wider px-2 py-1 focus:outline-none focus:border-emerald-500"
+                >
+                  {SELECTABLE_CONSTITUENCIES.map((c) => (
+                    <option key={c.slug} value={c.slug}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p className="mt-1 text-[10px] text-zinc-600">
+                Currently viewing: {activeConstituency?.name ?? "Braintree"}
+              </p>
             </div>
           </nav>
         </div>

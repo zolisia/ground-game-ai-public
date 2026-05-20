@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 interface Indicator {
   name: string;
@@ -86,16 +87,17 @@ function ComparisonBar({
 }
 
 export default function EmploymentPanel() {
+  const { slug } = useConstituency();
   const [data, setData] = useState<EmploymentData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/employment")
+    fetch(withConstituency("/api/employment", slug))
       .then((res) => res.json())
       .then((d: EmploymentData) => setData(d))
       .catch(() => setData(null))
       .finally(() => setLoading(false));
-  }, []);
+  }, [slug]);
 
   if (loading) {
     return (

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ExternalLink, Bookmark } from "lucide-react";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 interface HeadlineItem {
   title: string;
@@ -26,6 +27,7 @@ function getSourceStyle(source: string) {
 }
 
 export default function Headlines() {
+  const { slug } = useConstituency();
   const [headlines, setHeadlines] = useState<HeadlineItem[]>([]);
   const [briefings, setBriefings] = useState<HeadlineItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -35,7 +37,7 @@ export default function Headlines() {
     async function fetchHeadlines() {
       setLoading(true);
       try {
-        const res = await fetch("/api/headlines");
+        const res = await fetch(withConstituency("/api/headlines", slug));
         if (!res.ok) throw new Error("Failed");
         const data = await res.json();
         setHeadlines(data.headlines || []);
@@ -47,7 +49,8 @@ export default function Headlines() {
       }
     }
     fetchHeadlines();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
 
   if (loading) {
     return (

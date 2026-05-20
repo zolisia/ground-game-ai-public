@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ExternalLink, MessageSquare, HelpCircle, Vote, FileText } from "lucide-react";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 type Tab = "speeches" | "questions";
 
@@ -27,6 +28,7 @@ interface Question {
 }
 
 export default function HansardFeed() {
+  const { slug } = useConstituency();
   const [tab, setTab] = useState<Tab>("speeches");
   const [speeches, setSpeeches] = useState<Speech[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -34,12 +36,13 @@ export default function HansardFeed() {
 
   useEffect(() => {
     fetchSpeeches();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
 
   async function fetchSpeeches() {
     try {
       setLoading(true);
-      const res = await fetch("/api/hansard?type=speeches");
+      const res = await fetch(withConstituency("/api/hansard?type=speeches", slug));
       if (!res.ok) throw new Error("Failed");
       const data = await res.json();
       setSpeeches(data.speeches || []);
@@ -53,7 +56,7 @@ export default function HansardFeed() {
   async function fetchQuestions() {
     try {
       setLoading(true);
-      const res = await fetch("/api/hansard?type=questions");
+      const res = await fetch(withConstituency("/api/hansard?type=questions", slug));
       if (!res.ok) throw new Error("Failed");
       const data = await res.json();
       setQuestions(data.questions || []);

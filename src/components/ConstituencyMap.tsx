@@ -5,6 +5,8 @@ import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { constituencyGeo, wardData, wardElectoralCalc as fallbackWardElectoralCalc } from "@/data/braintree";
 import { Layers, ChevronDown, ChevronUp } from "lucide-react";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
+import { getFullData } from "@/data";
 
 // Layer definitions — World Monitor style
 interface LayerDef {
@@ -50,6 +52,7 @@ interface PlanningApp {
 }
 
 export default function ConstituencyMap() {
+  const { slug } = useConstituency();
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const fmsMarkers = useRef<maplibregl.Marker[]>([]);
@@ -76,13 +79,28 @@ export default function ConstituencyMap() {
 
   // Initialize map
   useEffect(() => {
-    if (!mapContainer.current || map.current) return;
+    if (!mapContainer.current) return;
+    if (map.current) {
+      // Tear down on slug change so we can re-init with new constituency data
+      for (const arr of [fmsMarkers, crimeMarkers, planningMarkers, worshipMarkers, floodMarkers, petitionMarkers, aqMarkers]) {
+        arr.current.forEach((mk) => mk.remove());
+        arr.current = [];
+      }
+      map.current.remove();
+      map.current = null;
+      setMapReady(false);
+    }
+
+    const data = getFullData(slug);
+    const center: [number, number] =
+      data?.geo ? [data.geo.lng, data.geo.lat] : constituencyGeo.center;
+    const zoom = constituencyGeo.zoom;
 
     const m = new maplibregl.Map({
       container: mapContainer.current,
       style: "https://tiles.openfreemap.org/styles/dark",
-      center: constituencyGeo.center,
-      zoom: constituencyGeo.zoom,
+      center,
+      zoom,
       minZoom: 9,
       maxZoom: 16,
     });
@@ -94,15 +112,15 @@ export default function ConstituencyMap() {
 
     m.on("load", async () => {
       try {
-        // Fetch GeoJSON and live EC data in parallel
+        // Fetch GeoJSON and live EC data in parallel.
+        // TODO: per-constituency boundary GeoJSON. We have constituencies-all.geojson
+        // (21MB) loaded by src/lib/geo.ts — could extract feature by ONS code here.
+        const isBraintree = slug === "braintree";
         const [constituencyRes, wardsRes, ecRes] = await Promise.all([
-          fetch("/geojson/braintree-constituency.geojson"),
-          fetch("/geojson/braintree-wards.geojson"),
-          fetch("/api/electoral-calculus?type=seat&seat=Braintree").catch(() => null),
+          isBraintree ? fetch("/geojson/braintree-constituency.geojson") : Promise.resolve(null),
+          isBraintree ? fetch("/geojson/braintree-wards.geojson") : Promise.resolve(null),
+          fetch(withConstituency("/api/electoral-calculus?type=seat", slug)).catch(() => null),
         ]);
-
-        const constituencyData = await constituencyRes.json();
-        const wardsData = await wardsRes.json();
 
         // Build live EC ward lookup, falling back to static data
         let wardElectoralCalc = fallbackWardElectoralCalc;
@@ -128,6 +146,12 @@ export default function ConstituencyMap() {
         } catch {
           // Keep fallback wardElectoralCalc
         }
+
+        // Boundary + wards setup runs only when we have the static Braintree GeoJSON.
+        // TODO: per-constituency boundary/ward GeoJSON for non-Braintree seats.
+        if (constituencyRes && wardsRes) {
+        const constituencyData = await constituencyRes.json();
+        const wardsData = await wardsRes.json();
 
         // Enrich ward features
         // Normalize ward names: GeoJSON uses "&" but EC/data may use "and" or vice versa
@@ -333,10 +357,11 @@ export default function ConstituencyMap() {
           for (const coord of coords) bounds.extend(coord as [number, number]);
           m.fitBounds(bounds, { padding: 40 });
         }
+        } // end if (constituencyRes && wardsRes)
 
         // Load FixMyStreet data for markers
         try {
-          const fmsRes = await fetch("/api/fixmystreet");
+          const fmsRes = await fetch(withConstituency("/api/fixmystreet", slug));
           const fmsData = await fmsRes.json();
           const issues: FMSIssue[] = fmsData.issues || [];
           for (const issue of issues.slice(0, 50)) {
@@ -365,7 +390,7 @@ export default function ConstituencyMap() {
 
         // Load crime data
         try {
-          const crimeRes = await fetch("/api/crime");
+          const crimeRes = await fetch(withConstituency("/api/crime", slug));
           const crimeData = await crimeRes.json();
           interface CrimeItem { category: string; lat: number; lng: number; street: string; month: string; outcome: string | null; }
           const crimes: CrimeItem[] = crimeData.crimes || [];
@@ -409,7 +434,7 @@ export default function ConstituencyMap() {
 
         // Load planning applications
         try {
-          const planRes = await fetch("/api/planning");
+          const planRes = await fetch(withConstituency("/api/planning", slug));
           const planData = await planRes.json();
           const apps: PlanningApp[] = planData.applications || [];
           const planColors: Record<string, string> = {
@@ -450,7 +475,7 @@ export default function ConstituencyMap() {
 
         // Load places of worship
         try {
-          const worshipRes = await fetch("/api/worship");
+          const worshipRes = await fetch(withConstituency("/api/worship", slug));
           const worshipData = await worshipRes.json();
           interface WorshipItem { id: number; name: string; religion: string; denomination: string; address: string; lat: number; lng: number; }
           const places: WorshipItem[] = worshipData.places || [];
@@ -498,7 +523,7 @@ export default function ConstituencyMap() {
 
         // Load flood monitoring stations
         try {
-          const floodRes = await fetch("/api/floods");
+          const floodRes = await fetch(withConstituency("/api/floods", slug));
           const floodData = await floodRes.json();
           interface FloodStation { id: string; label: string; lat: number; lng: number; river: string; type: string; latestValue: number | null; unit: string; }
           const stns: FloodStation[] = floodData.stations || [];
@@ -560,7 +585,7 @@ export default function ConstituencyMap() {
       map.current?.remove();
       map.current = null;
     };
-  }, []);
+  }, [slug]);
 
   // Sync layer visibility
   useEffect(() => {
@@ -651,7 +676,7 @@ export default function ConstituencyMap() {
 
     const fetchCensus = async () => {
       try {
-        const res = await fetch(`/api/census?topic=${censusTopic}`);
+        const res = await fetch(withConstituency(`/api/census?topic=${censusTopic}`, slug));
         const data = await res.json();
         if (!data.wards) return;
 
@@ -667,6 +692,12 @@ export default function ConstituencyMap() {
         if (!m) return;
         const source = m.getSource("wards") as maplibregl.GeoJSONSource;
         if (!source) return;
+
+        // Census recolour requires the per-ward GeoJSON. We only have it for Braintree.
+        // TODO: per-constituency ward GeoJSON so non-Braintree can recolour too.
+        if (slug !== "braintree") {
+          return;
+        }
 
         // We need to get the current data and enrich it
         // Use the wards geojson URL since we can't read from source directly
@@ -749,7 +780,7 @@ export default function ConstituencyMap() {
 
     fetchCensus();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [censusTopic, layers, mapReady]);
+  }, [censusTopic, layers, mapReady, slug]);
 
   // Fetch petitions when layer is toggled on
   useEffect(() => {
@@ -768,7 +799,7 @@ export default function ConstituencyMap() {
 
     const fetchPetitions = async () => {
       try {
-        const res = await fetch("/api/petitions");
+        const res = await fetch(withConstituency("/api/petitions", slug));
         const data = await res.json();
         interface PetitionItem { title: string; url: string; totalSignatures: number; localSignatures: number; salience: number; overIndexed: boolean; }
         const petitions: PetitionItem[] = data.petitions || [];
@@ -834,7 +865,7 @@ export default function ConstituencyMap() {
 
     const fetchAQ = async () => {
       try {
-        const res = await fetch("/api/air-quality");
+        const res = await fetch(withConstituency("/api/air-quality", slug));
         const data = await res.json();
         interface AQParam { parameter: string; lastValue: number; unit: string; }
         interface AQStation { id: number; name: string; lat: number; lng: number; parameters: AQParam[]; }

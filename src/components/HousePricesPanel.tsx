@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 interface IndexItem {
   period: string;
@@ -56,16 +57,17 @@ function formatDate(d: string): string {
 }
 
 export default function HousePricesPanel() {
+  const { slug } = useConstituency();
   const [data, setData] = useState<HousePriceData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/house-prices")
+    fetch(withConstituency("/api/house-prices", slug))
       .then((res) => res.json())
       .then((d: HousePriceData) => setData(d))
       .catch(() => setData(null))
       .finally(() => setLoading(false));
-  }, []);
+  }, [slug]);
 
   if (loading) {
     return (

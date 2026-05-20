@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 // Match the actual API response shape from /api/universal-credit
 interface UCData {
@@ -28,16 +29,17 @@ const AGE_COLORS = [
 ];
 
 export default function UniversalCreditPanel() {
+  const { slug } = useConstituency();
   const [data, setData] = useState<UCData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/universal-credit")
+    fetch(withConstituency("/api/universal-credit", slug))
       .then((res) => res.json())
       .then((d: UCData) => setData(d))
       .catch(() => setData(null))
       .finally(() => setLoading(false));
-  }, []);
+  }, [slug]);
 
   if (loading) {
     return (

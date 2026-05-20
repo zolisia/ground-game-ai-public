@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 interface SectionData {
   heading: string;
@@ -138,16 +139,17 @@ function Delta({ local, national, invert = false }: { local: string; national: s
 }
 
 export default function CommonsLibraryPanel() {
+  const { slug } = useConstituency();
   const [data, setData] = useState<CommonsLibraryData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/commons-library")
+    fetch(withConstituency("/api/commons-library", slug))
       .then((res) => res.json())
       .then((d: CommonsLibraryData) => setData(d))
       .catch(() => setData(null))
       .finally(() => setLoading(false));
-  }, []);
+  }, [slug]);
 
   if (loading) {
     return (
