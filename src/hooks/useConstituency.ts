@@ -7,6 +7,13 @@ import { useSearchParams } from "next/navigation";
 export const SELECTABLE_CONSTITUENCIES = [
   { slug: "braintree", name: "Braintree" },
   { slug: "clacton", name: "Clacton" },
+  { slug: "walthamstow", name: "Walthamstow" },
+  { slug: "sheffield-central", name: "Sheffield Central" },
+  { slug: "leeds-central-and-headingley", name: "Leeds Central and Headingley" },
+  { slug: "south-basildon-and-east-thurrock", name: "South Basildon and East Thurrock" },
+  { slug: "great-yarmouth", name: "Great Yarmouth" },
+  { slug: "streatham-and-croydon-north", name: "Streatham and Croydon North" },
+  { slug: "lewisham-east", name: "Lewisham East" },
 ] as const;
 
 export type ConstituencySlug = typeof SELECTABLE_CONSTITUENCIES[number]["slug"];

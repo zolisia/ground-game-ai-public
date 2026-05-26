@@ -74,6 +74,13 @@ async function loadConstituencyBoundary(onsCode: string): Promise<BoundaryCollec
 const WARDS_GEOJSON_PATHS: Record<string, string> = {
   braintree: "/geojson/braintree-wards.geojson",
   clacton: "/geojson/clacton-wards.geojson",
+  walthamstow: "/geojson/walthamstow-wards.geojson",
+  "sheffield-central": "/geojson/sheffield-central-wards.geojson",
+  "leeds-central-and-headingley": "/geojson/leeds-central-and-headingley-wards.geojson",
+  "south-basildon-and-east-thurrock": "/geojson/south-basildon-and-east-thurrock-wards.geojson",
+  "great-yarmouth": "/geojson/great-yarmouth-wards.geojson",
+  "streatham-and-croydon-north": "/geojson/streatham-and-croydon-north-wards.geojson",
+  "lewisham-east": "/geojson/lewisham-east-wards.geojson",
 };
 
 interface FMSIssue {
