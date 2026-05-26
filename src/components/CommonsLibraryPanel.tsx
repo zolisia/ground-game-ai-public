@@ -169,6 +169,30 @@ export default function CommonsLibraryPanel() {
     return <p className="text-zinc-500 text-xs">Constituency profile data unavailable</p>;
   }
 
+  // Gate on the presence of the grouped demographic sections. The route emits
+  // a `live` section for every constituency, but the population / economy /
+  // housing / etc. groups only appear for constituencies whose static profile
+  // has been sourced (currently Braintree only). Without this gate, the panel
+  // below would fall through to the hardcoded Braintree fallback strings on
+  // every `getRowVal(...) || "..."` line and silently misrepresent the data.
+  const hasDemographicProfile = !!(
+    data.sections.population?.[0]?.rows?.length ||
+    data.sections.economy?.[0]?.rows?.length ||
+    data.sections.housing?.[0]?.rows?.length
+  );
+  if (!hasDemographicProfile) {
+    return (
+      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6 text-center">
+        <p className="text-zinc-400 text-sm font-medium mb-1">
+          Demographic profile not yet sourced
+        </p>
+        <p className="text-zinc-600 text-[11px]">
+          Census 2021 indicators for {data.constituency} haven&apos;t been added to the data layer yet.
+        </p>
+      </div>
+    );
+  }
+
   // Extract key stats from the data
   const pop = data.sections.population?.[0]?.rows || [];
   const econ = data.sections.economy?.[0]?.rows || [];
