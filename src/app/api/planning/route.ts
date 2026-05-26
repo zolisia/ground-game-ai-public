@@ -178,32 +178,40 @@ export async function GET(request: Request) {
 
   const cacheDocRef = doc(db, "planning_cache", constituencySlug);
 
+  type CacheDoc = { data: { applications: unknown[]; total: number }; updated_at: string };
+  let cached: CacheDoc | null = null;
   try {
     const snap = await getDoc(cacheDocRef);
-    const cached = snap.exists() ? snap.data() : null;
-
-    if (cached) {
-      const ageMs = Date.now() - new Date(cached.updated_at).getTime();
-      if (ageMs > TTL_MS) {
-        fetchAndUpdateCache(bbox, constituencySlug, cacheDocRef);
-      }
-      return NextResponse.json({ ...cached.data, source: "cache" });
+    if (snap.exists()) {
+      cached = snap.data() as CacheDoc;
     }
+  } catch (err) {
+    console.warn("Planning cache read failed (continuing without cache):", err);
+  }
 
-    const fresh = await generateFreshData(bbox, constituencySlug);
-    if (!fresh) {
-      return NextResponse.json({ applications: [], total: 0 });
+  if (cached) {
+    const ageMs = Date.now() - new Date(cached.updated_at).getTime();
+    if (ageMs > TTL_MS) {
+      fetchAndUpdateCache(bbox, constituencySlug, cacheDocRef);
     }
+    return NextResponse.json({ ...cached.data, source: "cache" });
+  }
 
+  const fresh = await generateFreshData(bbox, constituencySlug);
+  if (!fresh) {
+    return NextResponse.json({ applications: [], total: 0 });
+  }
+
+  try {
     await setDoc(cacheDocRef, {
       data: fresh,
       updated_at: new Date().toISOString(),
     });
-
-    return NextResponse.json(fresh);
-  } catch {
-    return NextResponse.json({ applications: [], total: 0 });
+  } catch (err) {
+    console.warn("Planning cache write failed (returning fresh anyway):", err);
   }
+
+  return NextResponse.json(fresh);
 }
 
 function categoriseApplication(description: string): string {

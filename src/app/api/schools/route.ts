@@ -210,24 +210,36 @@ export async function GET(request: Request) {
 
   const cacheDocRef = doc(db, "schools_cache", constituencySlug);
 
+  type CacheDoc = { data: Record<string, unknown>; updated_at: string };
+  let cached: CacheDoc | null = null;
   try {
     const snap = await getDoc(cacheDocRef);
-    const cached = snap.exists() ? snap.data() : null;
-
-    if (cached) {
-      const ageMs = Date.now() - new Date(cached.updated_at).getTime();
-      if (ageMs > TTL_MS) {
-        fetchAndUpdateCache(constituencySlug, cacheDocRef);
-      }
-      return NextResponse.json({ ...cached.data, source: "cache" });
+    if (snap.exists()) {
+      cached = snap.data() as CacheDoc;
     }
+  } catch (err) {
+    console.warn("Schools cache read failed (continuing without cache):", err);
+  }
 
+  if (cached) {
+    const ageMs = Date.now() - new Date(cached.updated_at).getTime();
+    if (ageMs > TTL_MS) {
+      fetchAndUpdateCache(constituencySlug, cacheDocRef);
+    }
+    return NextResponse.json({ ...cached.data, source: "cache" });
+  }
+
+  try {
     const fresh = await generateFreshData(constituencySlug);
 
-    await setDoc(cacheDocRef, {
-      data: fresh,
-      updated_at: new Date().toISOString(),
-    });
+    try {
+      await setDoc(cacheDocRef, {
+        data: fresh,
+        updated_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.warn("Schools cache write failed (returning fresh anyway):", err);
+    }
 
     return NextResponse.json(fresh);
   } catch {

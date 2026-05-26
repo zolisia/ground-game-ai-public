@@ -379,36 +379,41 @@ export async function GET(request: Request) {
   // don't overwrite each other and constituencies don't collide.
   const cacheDocRef = doc(db, "census_cache", `${constituencySlug}-${topicId}`);
 
+  type CacheDoc = { data: Record<string, unknown>; updated_at: string };
+  let cached: CacheDoc | null = null;
   try {
     const snap = await getDoc(cacheDocRef);
-    const cached = snap.exists() ? snap.data() : null;
-
-    if (cached) {
-      const ageMs = Date.now() - new Date(cached.updated_at).getTime();
-      if (ageMs > TTL_MS) {
-        fetchAndUpdateCache(topic, cacheDocRef, WARD_CODES);
-      }
-      return NextResponse.json({ ...cached.data, source: "cache" });
+    if (snap.exists()) {
+      cached = snap.data() as CacheDoc;
     }
+  } catch (err) {
+    console.warn("Census cache read failed (continuing without cache):", err);
+  }
 
-    const fresh = await generateFreshData(topic, WARD_CODES);
-    if (!fresh) {
-      return NextResponse.json(
-        { error: "Failed to fetch census data" },
-        { status: 500 }
-      );
+  if (cached) {
+    const ageMs = Date.now() - new Date(cached.updated_at).getTime();
+    if (ageMs > TTL_MS) {
+      fetchAndUpdateCache(topic, cacheDocRef, WARD_CODES);
     }
+    return NextResponse.json({ ...cached.data, source: "cache" });
+  }
 
-    await setDoc(cacheDocRef, {
-      data: fresh,
-      updated_at: new Date().toISOString(),
-    });
-
-    return NextResponse.json(fresh);
-  } catch {
+  const fresh = await generateFreshData(topic, WARD_CODES);
+  if (!fresh) {
     return NextResponse.json(
       { error: "Failed to fetch census data" },
       { status: 500 }
     );
   }
+
+  try {
+    await setDoc(cacheDocRef, {
+      data: fresh,
+      updated_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.warn("Census cache write failed (returning fresh anyway):", err);
+  }
+
+  return NextResponse.json(fresh);
 }

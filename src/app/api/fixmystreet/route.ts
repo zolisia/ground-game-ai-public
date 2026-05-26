@@ -203,32 +203,40 @@ export async function GET(request: Request) {
 
   const cacheDocRef = doc(db, "fixmystreet_cache", constituencySlug);
 
+  type CacheDoc = { data: { issues: unknown[] }; updated_at: string };
+  let cached: CacheDoc | null = null;
   try {
     const snap = await getDoc(cacheDocRef);
-    const cached = snap.exists() ? snap.data() : null;
-
-    if (cached) {
-      const ageMs = Date.now() - new Date(cached.updated_at).getTime();
-      if (ageMs > TTL_MS) {
-        fetchAndUpdateCache(bboxes, constituencySlug, cacheDocRef);
-      }
-      return NextResponse.json({ ...cached.data, source: "cache" });
+    if (snap.exists()) {
+      cached = snap.data() as CacheDoc;
     }
+  } catch (err) {
+    console.warn("FixMyStreet cache read failed (continuing without cache):", err);
+  }
 
-    const fresh = await generateFreshData(bboxes, constituencySlug);
-    if (!fresh) {
-      return NextResponse.json({ issues: [] });
+  if (cached) {
+    const ageMs = Date.now() - new Date(cached.updated_at).getTime();
+    if (ageMs > TTL_MS) {
+      fetchAndUpdateCache(bboxes, constituencySlug, cacheDocRef);
     }
+    return NextResponse.json({ ...cached.data, source: "cache" });
+  }
 
+  const fresh = await generateFreshData(bboxes, constituencySlug);
+  if (!fresh) {
+    return NextResponse.json({ issues: [] });
+  }
+
+  try {
     await setDoc(cacheDocRef, {
       data: fresh,
       updated_at: new Date().toISOString(),
     });
-
-    return NextResponse.json(fresh);
-  } catch {
-    return NextResponse.json({ issues: [] });
+  } catch (err) {
+    console.warn("FixMyStreet cache write failed (returning fresh anyway):", err);
   }
+
+  return NextResponse.json(fresh);
 }
 
 function categoriseFromTitle(title: string): string {

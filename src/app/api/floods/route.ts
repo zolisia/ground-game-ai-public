@@ -159,21 +159,33 @@ export async function GET(request: Request) {
 
   const cacheDocRef = doc(db, "flood_cache", constituencySlug);
 
+  type CacheDoc = { data: { warnings: unknown[]; stations: unknown[]; activeWarnings: number }; updated_at: string };
+  let cached: CacheDoc | null = null;
   try {
     const snap = await getDoc(cacheDocRef);
-    const cached = snap.exists() ? snap.data() : null;
-
-    if (cached && !forceRefresh) {
-      fetchAndUpdateCache(CENTER_LAT, CENTER_LNG, constituencySlug, cacheDocRef);
-      return NextResponse.json({ ...cached.data, source: "cache" });
+    if (snap.exists()) {
+      cached = snap.data() as CacheDoc;
     }
+  } catch (err) {
+    console.warn("Flood cache read failed (continuing without cache):", err);
+  }
 
+  if (cached && !forceRefresh) {
+    fetchAndUpdateCache(CENTER_LAT, CENTER_LNG, constituencySlug, cacheDocRef);
+    return NextResponse.json({ ...cached.data, source: "cache" });
+  }
+
+  try {
     const freshData = await generateFreshData(CENTER_LAT, CENTER_LNG, constituencySlug);
 
-    await setDoc(cacheDocRef, {
-      data: freshData,
-      updated_at: new Date().toISOString(),
-    });
+    try {
+      await setDoc(cacheDocRef, {
+        data: freshData,
+        updated_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.warn("Flood cache write failed (returning fresh anyway):", err);
+    }
 
     return NextResponse.json(freshData);
   } catch (err) {

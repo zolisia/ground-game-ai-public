@@ -288,30 +288,40 @@ export async function GET(request: Request) {
 
   const cacheDocRef = doc(db, "crime_cache", constituencySlug);
 
+  // Cache read is best-effort. If Firestore rules deny or it's unreachable,
+  // we skip the cache rather than failing the route.
+  let cached: { data: CrimeData; updated_at: string } | null = null;
   try {
     const snap = await getDoc(cacheDocRef);
-    const cached = snap.exists() ? snap.data() : null;
-
-    if (cached) {
-      const ageMs = Date.now() - new Date(cached.updated_at).getTime();
-      if (ageMs > TTL_MS) {
-        fetchAndUpdateCache(samplePoints, constituencySlug, cacheDocRef);
-      }
-      return NextResponse.json({ ...cached.data, source: "cache" });
+    if (snap.exists()) {
+      cached = snap.data() as { data: CrimeData; updated_at: string };
     }
+  } catch (err) {
+    console.warn("Crime cache read failed (continuing without cache):", err);
+  }
 
-    const fresh = await generateFreshData(samplePoints, constituencySlug);
-    if (!fresh) {
-      return NextResponse.json({ crimes: [], error: "Failed to fetch" }, { status: 500 });
+  if (cached) {
+    const ageMs = Date.now() - new Date(cached.updated_at).getTime();
+    if (ageMs > TTL_MS) {
+      fetchAndUpdateCache(samplePoints, constituencySlug, cacheDocRef);
     }
+    return NextResponse.json({ ...cached.data, source: "cache" });
+  }
 
+  const fresh = await generateFreshData(samplePoints, constituencySlug);
+  if (!fresh) {
+    return NextResponse.json({ crimes: [], error: "Failed to fetch" }, { status: 500 });
+  }
+
+  // Cache write is also best-effort — return the fresh data regardless.
+  try {
     await setDoc(cacheDocRef, {
       data: fresh,
       updated_at: new Date().toISOString(),
     });
-
-    return NextResponse.json(fresh);
-  } catch {
-    return NextResponse.json({ crimes: [], error: "Failed to fetch" }, { status: 500 });
+  } catch (err) {
+    console.warn("Crime cache write failed (returning fresh anyway):", err);
   }
+
+  return NextResponse.json(fresh);
 }

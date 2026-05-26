@@ -284,30 +284,38 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const forceRefresh = searchParams.get("refresh") === "true";
 
+  type CacheDoc = { data: Record<string, unknown>; updated_at: string };
+  let cached: CacheDoc | null = null;
   try {
     const snap = await getDoc(cacheDoc);
-    const cached = snap.exists() ? snap.data() : null;
-
-    if (cached && !forceRefresh) {
-      const ageMs = Date.now() - new Date(cached.updated_at).getTime();
-      if (ageMs > TTL_MS) {
-        fetchAndUpdateCache();
-      }
-      return NextResponse.json({ ...cached.data, cached: true });
+    if (snap.exists()) {
+      cached = snap.data() as CacheDoc;
     }
+  } catch (err) {
+    console.warn("Trends cache read failed (continuing without cache):", err);
+  }
 
-    const fresh = await generateFreshData();
-    if (!fresh) {
-      return NextResponse.json({ ...EMPTY_PAYLOAD, error: "Failed to fetch" }, { status: 500 });
+  if (cached && !forceRefresh) {
+    const ageMs = Date.now() - new Date(cached.updated_at).getTime();
+    if (ageMs > TTL_MS) {
+      fetchAndUpdateCache();
     }
+    return NextResponse.json({ ...cached.data, cached: true });
+  }
 
+  const fresh = await generateFreshData();
+  if (!fresh) {
+    return NextResponse.json({ ...EMPTY_PAYLOAD, error: "Failed to fetch" }, { status: 500 });
+  }
+
+  try {
     await setDoc(cacheDoc, {
       data: fresh,
       updated_at: new Date().toISOString(),
     });
-
-    return NextResponse.json(fresh);
-  } catch {
-    return NextResponse.json({ ...EMPTY_PAYLOAD, error: "Failed to fetch" }, { status: 500 });
+  } catch (err) {
+    console.warn("Trends cache write failed (returning fresh anyway):", err);
   }
+
+  return NextResponse.json(fresh);
 }
