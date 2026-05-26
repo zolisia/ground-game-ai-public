@@ -6,7 +6,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { constituencyGeo, wardData, wardElectoralCalc as fallbackWardElectoralCalc } from "@/data/braintree";
 import { Layers, ChevronDown, ChevronUp } from "lucide-react";
 import { useConstituency, withConstituency } from "@/hooks/useConstituency";
-import { getFullData } from "@/data";
+import { getFullData, WARD_DEPRIVATION } from "@/data";
 
 // Layer definitions — World Monitor style
 interface LayerDef {
@@ -234,8 +234,15 @@ export default function ConstituencyMap() {
         for (const [k, v] of Object.entries(wardElectoralCalc)) {
           ecNorm[norm(k)] = v;
         }
+        // MHCLG IMD 2019 deprivation, keyed by WD24CD per constituency. Falls
+        // through to Braintree's static name-keyed `wd.deprivation` below if
+        // the slug isn't covered here yet.
+        const depByCode = new Map(
+          (WARD_DEPRIVATION[slug] ?? []).map((w) => [w.code, w.class])
+        );
         for (const feature of wardsData.features) {
           const wardName = feature.properties.WD24NM;
+          const wardCode = feature.properties.WD24CD;
           const key = norm(wardName);
           const wd = wardLookup.get(key);
           const ec = ecNorm[key];
@@ -248,6 +255,8 @@ export default function ConstituencyMap() {
             feature.properties.population = wd.population;
             feature.properties.deprivation = wd.deprivation;
           }
+          const dep = depByCode.get(wardCode);
+          if (dep) feature.properties.deprivation = dep;
           if (ec) {
             feature.properties.predictedWinner = ec.predictedWinner;
             feature.properties.winner2024 = ec.winner2024;

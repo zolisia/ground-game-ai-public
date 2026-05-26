@@ -8,6 +8,7 @@ export * from "./constituency-geo";
 export * from "./constituency-areas";
 export * from "./candidates-2024";
 export * from "./news-feeds";
+export * from "./ward-deprivation";
 
 import { CONSTITUENCIES, type Constituency } from "./constituencies";
 import { MP_DATA, type MpData } from "./mp-data";
