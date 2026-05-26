@@ -251,16 +251,31 @@ export default function ConstituencyMap() {
 
         m.addSource("wards", { type: "geojson", data: wardsData });
 
+        // Party-colour expression shared between the 2024 Vote Share and MRP
+        // Prediction layers. Driven by per-ward EC data attached during
+        // enrichment (`winner2024` / `predictedWinner`). Both layers use the
+        // same colour scheme so swaps between them are visually consistent.
+        const partyColourBy = (field: string): maplibregl.ExpressionSpecification => [
+          "match", ["get", field],
+          "CON", "#0087DC",
+          "LAB", "#DC241f",
+          "Reform", "#12B6CF",
+          "LIB", "#FAA61A",
+          "Green", "#6AB023",
+          "#666666",
+        ];
+        const predColorExpr = partyColourBy("predictedWinner");
+
         // === LAYER: Ward 2024 Vote Choropleth ===
+        // Coloured by the EC-derived `winner2024` field rather than a static
+        // Conservative-only vote-share gradient. Works for any constituency
+        // that has EC ward data (currently Braintree + Clacton).
         m.addLayer({
           id: "wards-vote-fill",
           type: "fill",
           source: "wards",
           paint: {
-            "fill-color": [
-              "interpolate", ["linear"], ["coalesce", ["get", "conVote"], 40],
-              30, "#e74c3c", 36, "#f39c12", 40, "#3498db", 45, "#2471a3", 50, "#1a5276",
-            ],
+            "fill-color": partyColourBy("winner2024"),
             "fill-opacity": 0.5,
           },
         });
@@ -272,15 +287,6 @@ export default function ConstituencyMap() {
         });
 
         // === LAYER: MRP Prediction ===
-        const predColorExpr: maplibregl.ExpressionSpecification = [
-          "match", ["get", "predictedWinner"],
-          "CON", "#0087DC",
-          "LAB", "#DC241f",
-          "Reform", "#12B6CF",
-          "LIB", "#FAA61A",
-          "Green", "#6AB023",
-          "#666666",
-        ];
         m.addLayer({
           id: "wards-prediction-fill",
           type: "fill",
