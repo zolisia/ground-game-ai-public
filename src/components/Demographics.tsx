@@ -1,7 +1,9 @@
 "use client";
 
 import { demographics, wardDemographics, type DemographicSet } from "@/data/braintree";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useConstituency } from "@/hooks/useConstituency";
+import { getFullData } from "@/data";
 
 type Category = "age" | "ethnicity" | "housing" | "education";
 
@@ -13,11 +15,29 @@ const categoryColors: Record<Category, string[]> = {
 };
 
 export default function Demographics() {
+  const { slug, name: constituencyName } = useConstituency();
+  const fullData = getFullData(slug);
+  const isBraintree = slug === "braintree";
+
+  // Ward dropdown is populated from the data layer for the active
+  // constituency. Per-ward demographic data is currently only sourced for
+  // Braintree — for other constituencies we still show the dropdown but
+  // selecting a ward falls back to the constituency-level (Braintree static)
+  // demographic chart, and we flag the gap in the UI.
+  const wardNames = (fullData?.areas?.wards ?? []).map((w) => w.name);
+
   const [selectedWard, setSelectedWard] = useState<string>("all");
 
-  const wardNames = Object.keys(wardDemographics);
+  // Reset selection when switching constituencies (so a stale ward name from
+  // the previous constituency doesn't carry over).
+  useEffect(() => {
+    setSelectedWard("all");
+  }, [slug]);
+
   const currentData: DemographicSet =
-    selectedWard === "all" ? demographics : (wardDemographics[selectedWard] || demographics);
+    isBraintree && selectedWard !== "all"
+      ? (wardDemographics[selectedWard] || demographics)
+      : demographics;
 
   const categories: { key: Category; label: string }[] = [
     { key: "age", label: "Age" },
@@ -38,11 +58,17 @@ export default function Demographics() {
         onChange={(e) => setSelectedWard(e.target.value)}
         className="w-full bg-zinc-800 border border-zinc-700 text-zinc-200 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-emerald-500"
       >
-        <option value="all">All Braintree (Constituency Average)</option>
-        {wardNames.map((name) => (
-          <option key={name} value={name}>{name}</option>
+        <option value="all">All {constituencyName} (Constituency Average)</option>
+        {wardNames.map((wn) => (
+          <option key={wn} value={wn}>{wn}</option>
         ))}
       </select>
+
+      {!isBraintree && (
+        <div className="text-[10px] text-zinc-500 -mt-2">
+          Per-ward demographic breakdowns not yet sourced for {constituencyName} — the chart below shows Braintree constituency averages as a placeholder.
+        </div>
+      )}
 
       {/* 4-column grid of categories */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
