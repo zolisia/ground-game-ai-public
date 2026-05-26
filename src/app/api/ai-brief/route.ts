@@ -8,22 +8,25 @@ export const maxDuration = 30;
 
 const TTL_MS = 30 * 60 * 1000;
 
-// Per-constituency placeholder. Date is computed at call time so the brief
-// reflects when the request happened (not when the module loaded).
-function buildPlaceholderBrief(
-  constituencyName: string,
-  mpName: string,
-  mpParty: string
-): string {
-  const today = new Date().toLocaleDateString("en-GB", {
+// Date helper — same format used in all placeholder/error briefs.
+function briefDate(): string {
+  return new Date().toLocaleDateString("en-GB", {
     weekday: "long",
     year: "numeric",
     month: "long",
     day: "numeric",
   });
+}
+
+// Shown when ANTHROPIC_API_KEY is not set on the server.
+function buildNoKeyBrief(
+  constituencyName: string,
+  mpName: string,
+  mpParty: string
+): string {
   return `# Constituency Intelligence Brief — ${constituencyName}
 
-**Generated:** ${today}
+**Generated:** ${briefDate()}
 
 **MP:** ${mpName} (${mpParty})
 
@@ -41,6 +44,29 @@ function buildPlaceholderBrief(
 ---
 
 *Configure your API key to unlock daily AI-synthesised intelligence briefs.*
+`;
+}
+
+// Shown when the Anthropic call (or the upstream data fetch) fails despite
+// the key being set. The reason is also surfaced in the response's `error`
+// field so the UI can show diagnostic detail.
+function buildErrorBrief(
+  constituencyName: string,
+  mpName: string,
+  mpParty: string,
+  reason: string
+): string {
+  return `# Constituency Intelligence Brief — ${constituencyName}
+
+**Generated:** ${briefDate()}
+
+**MP:** ${mpName} (${mpParty})
+
+---
+
+> **AI Brief generation failed.** ${reason}
+
+Check the dev server console for the full upstream error.
 `;
 }
 
@@ -216,7 +242,7 @@ async function generateFreshBrief(
   constituencyName: string,
   mpName: string,
   mpParty: string
-): Promise<BriefData | null> {
+): Promise<BriefData | { error: string }> {
   try {
     const data = await fetchLocalData(baseUrl, slug);
     const prompt = buildPrompt(data, constituencyName, mpName, mpParty);
@@ -239,15 +265,19 @@ async function generateFreshBrief(
     if (!anthropicRes.ok) {
       const errorBody = await anthropicRes.text();
       console.error("Anthropic API error:", anthropicRes.status, errorBody);
-      return null;
+      // Surface a short, safe summary in the response so the UI can show it
+      // (truncate to avoid dumping multi-KB error pages in the API result).
+      return { error: `Anthropic API ${anthropicRes.status}: ${errorBody.slice(0, 240)}` };
     }
 
     const anthropicData = await anthropicRes.json();
-    const brief =
-      anthropicData.content
-        ?.filter((block: { type: string }) => block.type === "text")
-        .map((block: { text: string }) => block.text)
-        .join("\n") || buildPlaceholderBrief(constituencyName, mpName, mpParty);
+    const brief = anthropicData.content
+      ?.filter((block: { type: string }) => block.type === "text")
+      .map((block: { text: string }) => block.text)
+      .join("\n");
+    if (!brief) {
+      return { error: "Anthropic returned an empty response (no text blocks)" };
+    }
 
     return {
       brief,
@@ -257,7 +287,7 @@ async function generateFreshBrief(
     };
   } catch (error) {
     console.error("AI Brief generation failed:", error);
-    return null;
+    return { error: `Brief generation threw: ${error instanceof Error ? error.message : String(error)}` };
   }
 }
 
@@ -272,7 +302,8 @@ async function fetchAndUpdateCache(
 ) {
   try {
     const fresh = await generateFreshBrief(baseUrl, apiKey, slug, constituencyName, mpName, mpParty);
-    if (!fresh) return;
+    // Don't cache error responses — only successful BriefData.
+    if ("error" in fresh) return;
 
     const existing = await getDoc(cacheDocRef);
     const existingData = existing.exists() ? existing.data().data : null;
@@ -318,56 +349,63 @@ export async function GET(request: Request) {
   const MP_PARTY = constituencyData.constituency.party;
 
   const cacheDocRef = doc(db, "ai_brief_cache", constituencySlug);
-  const placeholderBrief = buildPlaceholderBrief(CONSTITUENCY_NAME, MP_NAME, MP_PARTY);
 
+  // Cache read is best-effort. If Firestore is unreachable or the security
+  // rules deny the read, we don't surface that to the user — we just skip the
+  // cache and generate fresh.
+  let cached: { data: BriefData; updated_at: string } | null = null;
   try {
     const snap = await getDoc(cacheDocRef);
-    const cached = snap.exists() ? snap.data() : null;
+    if (snap.exists()) {
+      cached = snap.data() as { data: BriefData; updated_at: string };
+    }
+  } catch (err) {
+    console.warn("AI brief cache read failed (continuing without cache):", err);
+  }
 
-    if (cached) {
-      if (apiKey) {
-        const ageMs = Date.now() - new Date(cached.updated_at).getTime();
-        if (ageMs > TTL_MS) {
-          fetchAndUpdateCache(baseUrl, apiKey, cacheDocRef, constituencySlug, CONSTITUENCY_NAME, MP_NAME, MP_PARTY);
-        }
+  if (cached) {
+    if (apiKey) {
+      const ageMs = Date.now() - new Date(cached.updated_at).getTime();
+      if (ageMs > TTL_MS) {
+        fetchAndUpdateCache(baseUrl, apiKey, cacheDocRef, constituencySlug, CONSTITUENCY_NAME, MP_NAME, MP_PARTY);
       }
-      return NextResponse.json({ ...cached.data, source: "cache" });
     }
+    return NextResponse.json({ ...cached.data, source: "cache" });
+  }
 
-    if (!apiKey) {
-      return NextResponse.json(
-        { brief: placeholderBrief, generated: new Date().toISOString(), cached: false },
-        { status: 200 }
-      );
-    }
-
-    const fresh = await generateFreshBrief(baseUrl, apiKey, constituencySlug, CONSTITUENCY_NAME, MP_NAME, MP_PARTY);
-    if (!fresh) {
-      return NextResponse.json(
-        {
-          brief: placeholderBrief,
-          generated: new Date().toISOString(),
-          error: "Brief generation failed",
-        },
-        { status: 200 }
-      );
-    }
-
-    await setDoc(cacheDocRef, {
-      data: fresh,
-      updated_at: new Date().toISOString(),
-    });
-
-    return NextResponse.json(fresh, { status: 200 });
-  } catch (error) {
-    console.error("AI brief route error:", error);
+  if (!apiKey) {
     return NextResponse.json(
       {
-        brief: placeholderBrief,
+        brief: buildNoKeyBrief(CONSTITUENCY_NAME, MP_NAME, MP_PARTY),
         generated: new Date().toISOString(),
-        error: "Brief generation failed",
+        cached: false,
       },
       { status: 200 }
     );
   }
+
+  const fresh = await generateFreshBrief(baseUrl, apiKey, constituencySlug, CONSTITUENCY_NAME, MP_NAME, MP_PARTY);
+  if ("error" in fresh) {
+    return NextResponse.json(
+      {
+        brief: buildErrorBrief(CONSTITUENCY_NAME, MP_NAME, MP_PARTY, fresh.error),
+        generated: new Date().toISOString(),
+        error: fresh.error,
+      },
+      { status: 200 }
+    );
+  }
+
+  // Cache write is also best-effort — don't fail the request if Firestore
+  // rules block it. The generated brief is still returned to the caller.
+  try {
+    await setDoc(cacheDocRef, {
+      data: fresh,
+      updated_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.warn("AI brief cache write failed (returning fresh anyway):", err);
+  }
+
+  return NextResponse.json(fresh, { status: 200 });
 }
