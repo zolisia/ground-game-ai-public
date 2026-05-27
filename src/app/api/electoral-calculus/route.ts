@@ -86,8 +86,21 @@ export async function GET(request: Request) {
   // slug ("witham") returns EC's "Seat not found" page (~680 bytes), which
   // previously fell through as an empty result. Map slug → EC name via the
   // data layer. `?seat=` is an escape-hatch for callers who already know the
-  // exact EC name (used in legacy URLs and for the handful of constituencies
-  // where EC's name differs from ONS/Parliament's, e.g. `Mid Bedfordshire`).
+  // exact EC name.
+  //
+  // EC uses a "place-first" naming convention for several seats where the
+  // ONS/Parliament name leads with a direction — e.g. ONS "South Basildon
+  // and East Thurrock" becomes EC's "Basildon South and East Thurrock"
+  // (confirmed via electdata_2024.txt, SeatCode E14001480). The map below
+  // captures every known slug whose EC name diverges from
+  // `constituency.name`; add an entry when audit/electoral-calculus probes
+  // surface a new "Seat not found" 400. (EC's full seat list is at
+  // https://www.electoralcalculus.co.uk/electdata_2024.txt — `;`-delimited,
+  // Name in the first column.)
+  const EC_NAME_OVERRIDES: Record<string, string> = {
+    "south-basildon-and-east-thurrock": "Basildon South and East Thurrock",
+  };
+
   const explicitSeat = searchParams.get("seat");
   const constituencySlug = searchParams.get("constituency") || "braintree";
 
@@ -102,7 +115,7 @@ export async function GET(request: Request) {
         { status: 400 }
       );
     }
-    ecSeatName = constituencyData.constituency.name;
+    ecSeatName = EC_NAME_OVERRIDES[constituencySlug] ?? constituencyData.constituency.name;
   }
 
   try {
