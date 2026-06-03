@@ -13,9 +13,6 @@ const TTL_MS = 7 * 24 * 60 * 60 * 1000; // EPC aggregate stats change quarterly 
 
 const EPC_BASE = "https://epc.opendatacommunities.org/api/v1/domestic/search";
 
-// Braintree-only fallback. Used when the data layer doesn't yet have postcodes
-// for the requested constituency. See REFACTOR_AUDIT.md §5 (missing data) for
-// the per-constituency postcode sourcing task.
 const BRAINTREE_POSTCODES = ["CM7", "CM77", "CO9"];
 
 interface EPCRecord {
@@ -81,16 +78,7 @@ export async function GET(request: Request) {
     );
   }
 
-  // Try to get postcodes from data layer (forward-compatible: will be populated
-  // when per-constituency postcodes are sourced — see REFACTOR_AUDIT.md §5).
-  // Type cast because ConstituencyAreas doesn't yet declare a `postcodes` field;
-  // when added, this cast becomes a no-op.
-  const areasWithPostcodes = constituencyData.areas as
-    | { postcodes?: string[] }
-    | undefined;
-  const POSTCODES =
-    areasWithPostcodes?.postcodes ??
-    (constituencySlug === "braintree" ? BRAINTREE_POSTCODES : null);
+  const POSTCODES = constituencyData.areas?.postcodes ?? (constituencySlug === "braintree" ? BRAINTREE_POSTCODES : null);
 
   if (!POSTCODES) {
     return Response.json(

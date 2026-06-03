@@ -3,8 +3,6 @@
 import { MapPin, User, Building2, Users } from "lucide-react";
 import { useConstituency } from "@/hooks/useConstituency";
 import { getFullData } from "@/data";
-import { constituencyProfile as braintreeProfile } from "@/data/braintree";
-
 export default function ConstituencyProfile() {
   const { slug } = useConstituency();
   const data = getFullData(slug);
@@ -20,9 +18,7 @@ export default function ConstituencyProfile() {
   const mpName = data.mp?.name ?? data.constituency.mp;
   const party = data.constituency.party;
   const electorate = data.constituency.electorate;
-  // Population isn't sourced per-constituency yet — only Braintree has a real
-  // figure from the static profile. Show "—" for others until sourced.
-  const population = slug === "braintree" ? braintreeProfile.population : null;
+  const population = data.constituency.population ?? null;
 
   const localAuthorities = (data.areas?.lads ?? []).map((lad) => lad.name);
   const region = data.constituency.region;

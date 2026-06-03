@@ -12,7 +12,6 @@ import { getFullData, WARD_DEPRIVATION } from "@/data";
 interface LayerDef {
   id: string;
   label: string;
-  emoji: string;
   description: string;
   default: boolean;
 }
@@ -1034,7 +1033,7 @@ export default function ConstituencyMap() {
                     onChange={() => toggleLayer(layer.id)}
                     className="w-3 h-3 rounded border-zinc-600 bg-zinc-800 text-emerald-500 focus:ring-0 focus:ring-offset-0 accent-emerald-500"
                   />
-                  <span className="text-sm">{layer.emoji}</span>
+
                   <div className="flex-1 min-w-0">
                     <div className="text-[11px] text-zinc-300">{layer.label}</div>
                   </div>
