@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { doc, getDoc, setDoc, type DocumentReference } from "firebase/firestore";
+import type { DocumentReference } from "firebase-admin/firestore";
 import { isInsideConstituency } from "@/lib/geo";
-import { db } from "@/lib/firebase";
+import { adminDb } from "@/lib/firebase-admin";
 import { getFullData } from "@/data";
 
 export const dynamic = "force-dynamic";
@@ -129,14 +129,14 @@ async function fetchAndUpdateCache(
     const fresh = await generateFreshData(bbox, constituencySlug);
     if (!fresh) return;
 
-    const existing = await getDoc(cacheDocRef);
-    const existingData = existing.exists() ? existing.data().data : null;
+    const existing = await cacheDocRef.get();
+    const existingData = existing.data()?.data ?? null;
 
     if (existingData && JSON.stringify(existingData) === JSON.stringify(fresh)) {
       return;
     }
 
-    await setDoc(cacheDocRef, {
+    await cacheDocRef.set({
       data: fresh,
       updated_at: new Date().toISOString(),
     });
@@ -148,6 +148,7 @@ async function fetchAndUpdateCache(
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const constituencySlug = searchParams.get("constituency") || "braintree";
+  const force = searchParams.get("force") === "1";
   const constituencyData = getFullData(constituencySlug);
 
   if (!constituencyData) {
@@ -176,24 +177,20 @@ export async function GET(request: Request) {
     );
   }
 
-  const cacheDocRef = doc(db, "planning_cache", constituencySlug);
+  const cacheDocRef = adminDb.collection("planning_cache").doc(constituencySlug);
 
   type CacheDoc = { data: { applications: unknown[]; total: number }; updated_at: string };
   let cached: CacheDoc | null = null;
   try {
-    const snap = await getDoc(cacheDocRef);
-    if (snap.exists()) {
+    const snap = await cacheDocRef.get();
+    if (snap.exists) {
       cached = snap.data() as CacheDoc;
     }
   } catch (err) {
     console.warn("Planning cache read failed (continuing without cache):", err);
   }
 
-  if (cached) {
-    const ageMs = Date.now() - new Date(cached.updated_at).getTime();
-    if (ageMs > TTL_MS) {
-      fetchAndUpdateCache(bbox, constituencySlug, cacheDocRef);
-    }
+  if (cached && !force) {
     return NextResponse.json({ ...cached.data, source: "cache" });
   }
 
@@ -203,7 +200,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    await setDoc(cacheDocRef, {
+    await cacheDocRef.set({
       data: fresh,
       updated_at: new Date().toISOString(),
     });

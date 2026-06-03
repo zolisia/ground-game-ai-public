@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { doc, getDoc, setDoc, type DocumentReference } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import type { DocumentReference } from "firebase-admin/firestore";
+import { adminDb } from "@/lib/firebase-admin";
 import { getFullData } from "@/data";
 
 export const dynamic = "force-dynamic";
@@ -305,14 +305,14 @@ async function fetchAndUpdateCache(
     // Don't cache error responses — only successful BriefData.
     if ("error" in fresh) return;
 
-    const existing = await getDoc(cacheDocRef);
-    const existingData = existing.exists() ? existing.data().data : null;
+    const existing = await cacheDocRef.get();
+    const existingData = existing.data()?.data ?? null;
 
     if (existingData && JSON.stringify(existingData) === JSON.stringify(fresh)) {
       return;
     }
 
-    await setDoc(cacheDocRef, {
+    await cacheDocRef.set({
       data: fresh,
       updated_at: new Date().toISOString(),
     });
@@ -328,6 +328,7 @@ export async function GET(request: Request) {
   const { searchParams } = url;
 
   const constituencySlug = searchParams.get("constituency") || "braintree";
+  const force = searchParams.get("force") === "1";
   const constituencyData = getFullData(constituencySlug);
 
   if (!constituencyData) {
@@ -348,28 +349,22 @@ export async function GET(request: Request) {
   const MP_NAME = constituencyData.mp.name;
   const MP_PARTY = constituencyData.constituency.party;
 
-  const cacheDocRef = doc(db, "ai_brief_cache", constituencySlug);
+  const cacheDocRef = adminDb.collection("ai_brief_cache").doc(constituencySlug);
 
   // Cache read is best-effort. If Firestore is unreachable or the security
   // rules deny the read, we don't surface that to the user — we just skip the
   // cache and generate fresh.
   let cached: { data: BriefData; updated_at: string } | null = null;
   try {
-    const snap = await getDoc(cacheDocRef);
-    if (snap.exists()) {
+    const snap = await cacheDocRef.get();
+    if (snap.exists) {
       cached = snap.data() as { data: BriefData; updated_at: string };
     }
   } catch (err) {
     console.warn("AI brief cache read failed (continuing without cache):", err);
   }
 
-  if (cached) {
-    if (apiKey) {
-      const ageMs = Date.now() - new Date(cached.updated_at).getTime();
-      if (ageMs > TTL_MS) {
-        fetchAndUpdateCache(baseUrl, apiKey, cacheDocRef, constituencySlug, CONSTITUENCY_NAME, MP_NAME, MP_PARTY);
-      }
-    }
+  if (cached && !force) {
     return NextResponse.json({ ...cached.data, source: "cache" });
   }
 
@@ -399,7 +394,7 @@ export async function GET(request: Request) {
   // Cache write is also best-effort — don't fail the request if Firestore
   // rules block it. The generated brief is still returned to the caller.
   try {
-    await setDoc(cacheDocRef, {
+    await cacheDocRef.set({
       data: fresh,
       updated_at: new Date().toISOString(),
     });

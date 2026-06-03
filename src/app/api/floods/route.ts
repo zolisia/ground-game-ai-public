@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { doc, getDoc, setDoc, type DocumentReference } from "firebase/firestore";
+import type { DocumentReference } from "firebase-admin/firestore";
 import { isInsideConstituency } from "@/lib/geo";
-import { db } from "@/lib/firebase";
+import { adminDb } from "@/lib/firebase-admin";
 import { getFullData } from "@/data";
 
 export const dynamic = "force-dynamic";
@@ -114,14 +114,14 @@ async function fetchAndUpdateCache(
   try {
     const freshData = await generateFreshData(centerLat, centerLng, constituencySlug);
 
-    const existing = await getDoc(cacheDocRef);
-    const existingData = existing.exists() ? existing.data().data : null;
+    const existing = await cacheDocRef.get();
+    const existingData = existing.data()?.data ?? null;
 
     if (existingData && JSON.stringify(existingData) === JSON.stringify(freshData)) {
       return;
     }
 
-    await setDoc(cacheDocRef, {
+    await cacheDocRef.set({
       data: freshData,
       updated_at: new Date().toISOString(),
     });
@@ -132,7 +132,7 @@ async function fetchAndUpdateCache(
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const forceRefresh = searchParams.get("refresh") === "true";
+  const force = searchParams.get("force") === "1";
   const constituencySlug = searchParams.get("constituency") || "braintree";
   const constituencyData = getFullData(constituencySlug);
 
@@ -157,21 +157,20 @@ export async function GET(request: Request) {
     );
   }
 
-  const cacheDocRef = doc(db, "flood_cache", constituencySlug);
+  const cacheDocRef = adminDb.collection("flood_cache").doc(constituencySlug);
 
   type CacheDoc = { data: { warnings: unknown[]; stations: unknown[]; activeWarnings: number }; updated_at: string };
   let cached: CacheDoc | null = null;
   try {
-    const snap = await getDoc(cacheDocRef);
-    if (snap.exists()) {
+    const snap = await cacheDocRef.get();
+    if (snap.exists) {
       cached = snap.data() as CacheDoc;
     }
   } catch (err) {
     console.warn("Flood cache read failed (continuing without cache):", err);
   }
 
-  if (cached && !forceRefresh) {
-    fetchAndUpdateCache(CENTER_LAT, CENTER_LNG, constituencySlug, cacheDocRef);
+  if (cached && !force) {
     return NextResponse.json({ ...cached.data, source: "cache" });
   }
 
@@ -179,7 +178,7 @@ export async function GET(request: Request) {
     const freshData = await generateFreshData(CENTER_LAT, CENTER_LNG, constituencySlug);
 
     try {
-      await setDoc(cacheDocRef, {
+      await cacheDocRef.set({
         data: freshData,
         updated_at: new Date().toISOString(),
       });
