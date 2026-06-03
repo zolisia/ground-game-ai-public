@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { TrendingUp, Search, BarChart3 } from "lucide-react";
 import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
@@ -21,7 +21,8 @@ interface InterestOverTimePoint {
 
 interface RegionalComparison {
   keyword: string;
-  eastOfEnglandValue: number | null;
+  regionValue: number | null;
+  eastOfEnglandValue?: number | null; // legacy field — still present in old cached docs
   nationalAverage: number;
   rank: number | null;
   totalRegions: number;
@@ -49,35 +50,10 @@ interface TrendsV2Data {
   error?: string;
 }
 
-// ── Party colours (dead-coded — retained for future use) ────────────────────
-// Kept available for when /api/trends-v2's regionalVsNational populates with
-// party-tagged keywords. The current rewrite uses only PARTY_COLORS.con
-// (for the MP series) and PARTY_COLORS.default (for the constituency series).
-
-const PARTY_COLORS: Record<string, string> = {
-  con: "#0087DC",
-  reform: "#12B6CF",
-  labour: "#DC241f",
-  default: "#10b981",
+const SERIES_COLORS = {
+  mp: "#0087DC",
+  constituency: "#10b981",
 };
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function getPartyColor(query: string): string {
-  const q = query.toLowerCase();
-  if (q.includes("cleverly") || q.includes("conservative")) return PARTY_COLORS.con;
-  if (q.includes("reform")) return PARTY_COLORS.reform;
-  if (q.includes("labour")) return PARTY_COLORS.labour;
-  return PARTY_COLORS.default;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function getPartyLabel(query: string): string {
-  const q = query.toLowerCase();
-  if (q.includes("cleverly")) return "CON";
-  if (q.includes("reform")) return "REF";
-  if (q.includes("labour")) return "LAB";
-  return "";
-}
 
 // ── SVG Sparkline (unchanged from previous version) ─────────────────────────
 
@@ -159,53 +135,75 @@ function Sparkline({ data, color, width = 280, height = 48, id }: SparklineProps
 
 interface ComparisonSeries {
   label: string;
-  partyTag: string;
   color: string;
   data: number[];
-  current: number;
 }
 
-function ComparisonChart({ series }: { series: ComparisonSeries[] }) {
+function formatTickDate(raw: string): string {
+  // Google Trends formattedDate looks like "Jan 5, 2025" or "Week of Jan 5, 2025"
+  const cleaned = raw.replace(/^Week of /i, "");
+  try {
+    const d = new Date(cleaned);
+    if (isNaN(d.getTime())) return raw;
+    return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  } catch {
+    return raw;
+  }
+}
+
+function ComparisonChart({ series, dates }: { series: ComparisonSeries[]; dates: string[] }) {
   const WIDTH = 320;
   const HEIGHT = 100;
   const padY = 8;
   const padX = 4;
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
 
   const allVals = series.flatMap((s) => s.data);
   const globalMax = Math.max(...allVals, 1);
   const globalMin = Math.min(...allVals, 0);
   const range = globalMax - globalMin || 1;
+  const dataLen = series[0]?.data.length ?? 0;
 
   function toPoints(data: number[]) {
     return data.map((v, i) => ({
-      x: padX + (i / (data.length - 1)) * (WIDTH - padX * 2),
+      x: padX + (i / Math.max(data.length - 1, 1)) * (WIDTH - padX * 2),
       y: padY + (1 - (v - globalMin) / range) * (HEIGHT - padY * 2),
     }));
   }
 
-  const tickIndices = series[0]?.data.length
-    ? [0, Math.floor(series[0].data.length / 4), Math.floor(series[0].data.length / 2), Math.floor(3 * series[0].data.length / 4), series[0].data.length - 1]
+  const handleMouseMove = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
+    if (!svgRef.current || dataLen < 2) return;
+    const rect = svgRef.current.getBoundingClientRect();
+    const relX = e.clientX - rect.left;
+    const svgX = (relX / rect.width) * WIDTH;
+    const i = Math.round(((svgX - padX) / (WIDTH - padX * 2)) * (dataLen - 1));
+    setHoveredIndex(Math.max(0, Math.min(dataLen - 1, i)));
+  }, [dataLen]);
+
+  const tickIndices = dataLen > 1
+    ? [0, Math.floor(dataLen / 4), Math.floor(dataLen / 2), Math.floor((3 * dataLen) / 4), dataLen - 1]
     : [];
+
+  const hovX = hoveredIndex !== null && dataLen > 1
+    ? padX + (hoveredIndex / (dataLen - 1)) * (WIDTH - padX * 2)
+    : null;
 
   return (
     <div>
       <svg
-        viewBox={`0 0 ${WIDTH} ${HEIGHT + 16}`}
+        ref={svgRef}
+        viewBox={`0 0 ${WIDTH} ${HEIGHT + 18}`}
         width="100%"
-        height={HEIGHT + 16}
+        height={HEIGHT + 18}
         preserveAspectRatio="xMidYMid meet"
-        className="overflow-visible"
+        className="overflow-visible cursor-crosshair"
+        onMouseMove={handleMouseMove}
+        onMouseLeave={() => setHoveredIndex(null)}
       >
         <defs>
           {series.map((s, idx) => (
-            <linearGradient
-              key={idx}
-              id={`comp-area-${idx}`}
-              x1="0"
-              y1="0"
-              x2="0"
-              y2="1"
-            >
+            <linearGradient key={idx} id={`comp-area-${idx}`} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor={s.color} stopOpacity="0.12" />
               <stop offset="100%" stopColor={s.color} stopOpacity="0" />
             </linearGradient>
@@ -215,12 +213,9 @@ function ComparisonChart({ series }: { series: ComparisonSeries[] }) {
         {[0.25, 0.5, 0.75].map((frac) => (
           <line
             key={frac}
-            x1={padX}
-            y1={padY + frac * (HEIGHT - padY * 2)}
-            x2={WIDTH - padX}
-            y2={padY + frac * (HEIGHT - padY * 2)}
-            stroke="#27272a"
-            strokeWidth="0.5"
+            x1={padX} y1={padY + frac * (HEIGHT - padY * 2)}
+            x2={WIDTH - padX} y2={padY + frac * (HEIGHT - padY * 2)}
+            stroke="#27272a" strokeWidth="0.5"
           />
         ))}
 
@@ -234,74 +229,92 @@ function ComparisonChart({ series }: { series: ComparisonSeries[] }) {
 
         {series.map((s, idx) => {
           const pts = toPoints(s.data);
-          const d = pts
-            .map((p, i) => (i === 0 ? `M ${p.x},${p.y}` : `L ${p.x},${p.y}`))
-            .join(" ");
+          const d = pts.map((p, i) => (i === 0 ? `M ${p.x},${p.y}` : `L ${p.x},${p.y}`)).join(" ");
           return (
-            <path
-              key={`line-${idx}`}
-              d={d}
-              fill="none"
-              stroke={s.color}
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              opacity="0.9"
-            />
+            <path key={`line-${idx}`} d={d} fill="none" stroke={s.color}
+              strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" opacity="0.9" />
           );
         })}
 
-        {series.map((s, idx) => {
+        {/* Hover cursor */}
+        {hovX !== null && (
+          <line x1={hovX} y1={padY} x2={hovX} y2={HEIGHT} stroke="#52525b" strokeWidth="1" strokeDasharray="3,2" />
+        )}
+
+        {/* Hover dots + tooltip */}
+        {hoveredIndex !== null && hovX !== null && (() => {
+          const tooltipLines = series.map((s) => ({
+            label: s.label,
+            value: s.data[hoveredIndex] ?? 0,
+            color: s.color,
+          }));
+          const date = dates[hoveredIndex] ? formatTickDate(dates[hoveredIndex]) : "";
+          const tipW = 110;
+          const tipX = hovX + tipW > WIDTH ? hovX - tipW - 4 : hovX + 6;
+          const maxVal = Math.max(...tooltipLines.map((l) => l.value));
+
+          return (
+            <g>
+              {series.map((s, idx) => {
+                const pts = toPoints(s.data);
+                const pt = pts[hoveredIndex];
+                return pt ? (
+                  <g key={`hdot-${idx}`}>
+                    <circle cx={pt.x} cy={pt.y} r="4" fill={s.color} />
+                    <circle cx={pt.x} cy={pt.y} r="7" fill={s.color} opacity="0.2" />
+                  </g>
+                ) : null;
+              })}
+              <rect x={tipX} y={6} width={tipW} height={14 + tooltipLines.length * 13}
+                rx="3" fill="#18181b" stroke="#3f3f46" strokeWidth="0.75" />
+              {date && (
+                <text x={tipX + 6} y={17} fill="#71717a" fontSize="8" fontFamily="system-ui">
+                  {date}
+                </text>
+              )}
+              {tooltipLines.map((l, i) => (
+                <g key={i}>
+                  <circle cx={tipX + 9} cy={26 + i * 13} r="3" fill={l.color} />
+                  <text x={tipX + 16} y={30 + i * 13} fill="#d4d4d8" fontSize="9" fontFamily="system-ui">
+                    {l.label.split(" ")[0]}: <tspan fontWeight="600" fill={l.value === maxVal && maxVal > 0 ? l.color : "#d4d4d8"}>{l.value}</tspan>
+                  </text>
+                </g>
+              ))}
+            </g>
+          );
+        })()}
+
+        {/* End dots when not hovering */}
+        {hoveredIndex === null && series.map((s, idx) => {
           const pts = toPoints(s.data);
           const last = pts[pts.length - 1];
-          return (
+          return last ? (
             <g key={`dot-${idx}`}>
               <circle cx={last.x} cy={last.y} r="3.5" fill={s.color} />
               <circle cx={last.x} cy={last.y} r="6" fill={s.color} opacity="0.2" />
             </g>
-          );
+          ) : null;
         })}
 
+        {/* X-axis date ticks */}
         {tickIndices.map((ti, i) => {
-          if (series[0]?.data.length <= 1) return null;
-          const x = padX + (ti / (series[0].data.length - 1)) * (WIDTH - padX * 2);
-          const labels = ["90d", "60d", "45d", "15d", "now"];
+          if (dataLen <= 1) return null;
+          const x = padX + (ti / (dataLen - 1)) * (WIDTH - padX * 2);
+          const label = dates[ti] ? formatTickDate(dates[ti]) : "";
           return (
-            <text
-              key={i}
-              x={x}
-              y={HEIGHT + 12}
-              textAnchor="middle"
-              fill="#52525b"
-              fontSize="8"
-              fontFamily="system-ui, sans-serif"
-            >
-              {labels[i]}
+            <text key={i} x={x} y={HEIGHT + 14} textAnchor="middle"
+              fill="#52525b" fontSize="8" fontFamily="system-ui, sans-serif">
+              {label}
             </text>
           );
         })}
       </svg>
 
-      <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 px-1">
+      <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1 px-1">
         {series.map((s, idx) => (
           <div key={idx} className="flex items-center gap-1.5">
-            <span
-              className="inline-block w-2.5 h-2.5 rounded-full"
-              style={{ backgroundColor: s.color }}
-            />
+            <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: s.color }} />
             <span className="text-[11px] text-zinc-400">{s.label}</span>
-            {s.partyTag && (
-              <span
-                className="text-[9px] font-bold px-1 py-px rounded"
-                style={{
-                  color: s.color,
-                  backgroundColor: `${s.color}18`,
-                }}
-              >
-                {s.partyTag}
-              </span>
-            )}
-            <span className="text-[11px] font-medium text-zinc-300">{s.current}</span>
           </div>
         ))}
       </div>
@@ -348,34 +361,22 @@ export default function TrendsPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
-  // Build the two-series time-series chart from interestOverTime.
-  // MP series uses CON blue; constituency series uses default green.
   const comparisonSeries = useMemo<ComparisonSeries[]>(() => {
     const points = data?.interestOverTime ?? [];
     const mpName = data?.mpName;
     const constituencyName = data?.constituencyName;
     if (!points.length || !mpName || !constituencyName) return [];
 
-    const mpValues = points.map((p) => p.values?.[mpName] ?? 0);
-    const conValues = points.map((p) => p.values?.[constituencyName] ?? 0);
-
     return [
-      {
-        label: mpName,
-        partyTag: "",
-        color: PARTY_COLORS.con,
-        data: mpValues,
-        current: mpValues[mpValues.length - 1] ?? 0,
-      },
-      {
-        label: constituencyName,
-        partyTag: "",
-        color: PARTY_COLORS.default,
-        data: conValues,
-        current: conValues[conValues.length - 1] ?? 0,
-      },
+      { label: mpName, color: SERIES_COLORS.mp, data: points.map((p) => p.values?.[mpName] ?? 0) },
+      { label: constituencyName, color: SERIES_COLORS.constituency, data: points.map((p) => p.values?.[constituencyName] ?? 0) },
     ];
   }, [data]);
+
+  const chartDates = useMemo(
+    () => (data?.interestOverTime ?? []).map((p) => p.formattedDate),
+    [data]
+  );
 
   const interestOk = comparisonSeries.length > 0;
   const regionalOk = (data?.regionalVsNational?.length ?? 0) > 0;
@@ -458,7 +459,7 @@ export default function TrendsPanel() {
         {interestOk ? (
           <>
             <div className="bg-zinc-900/40 rounded-lg p-3 border border-zinc-800/50">
-              <ComparisonChart series={comparisonSeries} />
+              <ComparisonChart series={comparisonSeries} dates={chartDates} />
             </div>
             <p className="text-[10px] text-zinc-600 mt-1.5 px-1">
               Party comparison data currently unavailable.
@@ -473,31 +474,31 @@ export default function TrendsPanel() {
       <div className="px-3">
         <div className="flex items-center gap-2 mb-2">
           <Search className="h-3 w-3 text-zinc-500" />
-          <span
-            className="text-xs font-medium text-zinc-500"
-            title="Google Trends doesn't expose East of England as a query target, so this compares the East of England's slot in the regional breakdown against the UK average."
-          >
-            East of England vs UK average
+          <span className="text-xs font-medium text-zinc-500">
+            {data?.constituencyName ? `${data.constituencyName} region vs UK average` : "Region vs UK average"}
           </span>
         </div>
 
         {regionalOk && data?.regionalVsNational ? (
           <div className="bg-zinc-900/40 rounded-lg border border-zinc-800/50 divide-y divide-zinc-800/40">
-            {data.regionalVsNational.map((r) => (
-              <div key={r.keyword} className="px-3 py-2">
-                <div className="flex justify-between items-center mb-0.5">
-                  <span className="text-[12px] text-zinc-300">{r.keyword}</span>
-                  <span className="text-[11px] text-zinc-400 tabular-nums">
-                    EoE {r.eastOfEnglandValue ?? "—"} · avg {r.nationalAverage}
-                  </span>
+            {data.regionalVsNational.map((r) => {
+              const regionVal = r.regionValue ?? r.eastOfEnglandValue ?? null;
+              return (
+                <div key={r.keyword} className="px-3 py-2">
+                  <div className="flex justify-between items-center mb-0.5">
+                    <span className="text-[12px] text-zinc-300">{r.keyword}</span>
+                    <span className="text-[11px] text-zinc-400 tabular-nums">
+                      {regionVal ?? "—"} · avg {r.nationalAverage}
+                    </span>
+                  </div>
+                  {r.rank != null && (
+                    <p className="text-[10px] text-zinc-600">
+                      Rank {r.rank} of {r.totalRegions} regions
+                    </p>
+                  )}
                 </div>
-                {r.rank != null && (
-                  <p className="text-[10px] text-zinc-600">
-                    Rank {r.rank} of {r.totalRegions} regions
-                  </p>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <UnavailableSection />

@@ -1,17 +1,10 @@
 import { NextResponse } from "next/server";
-import { doc, getDoc, setDoc } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { adminDb } from "@/lib/firebase-admin";
 import { getFullData } from "@/data";
 import googleTrends from "google-trends-api";
 
 export const dynamic = "force-dynamic";
 
-// First API route to consume the @/data layer as the single source of truth
-// for MP name and constituency name. Every other API route in this folder
-// still hardcodes these values (e.g. parliament/route.ts has a literal MP_ID
-// constant). Lifting all routes onto the data layer is tracked in TODO.md
-// under "Constituency config refactor."
-//
 // google-trends-api scrapes Google's private Trends endpoints and was last
 // published 2020-12-28, so any of the three section calls below can break
 // without notice if Google rotates their internal API. Each section is
@@ -20,13 +13,13 @@ export const dynamic = "force-dynamic";
 // response shows which sections succeeded on the most recent attempt.
 
 const TTL_MS = 12 * 60 * 60 * 1000;
-const CONSTITUENCY_SLUG = "braintree";
-const cacheDoc = doc(db, "trends_cache", CONSTITUENCY_SLUG);
 
-// Strip peerage/knighthood honorifics from the start of the MP name so that
-// trends queries match how people actually search. Most people Google "James
-// Cleverly," not "Sir James Cleverly." The data layer keeps the formal title;
-// this stripping only affects what we send to Google Trends.
+const GEO_GB = "GB";
+const GEO_ENGLAND = "GB-ENG";
+const INTEREST_BY_REGION_DELAY_MS = 600;
+
+// Strip peerage/knighthood honorifics so trends queries match how people
+// actually search. Most people Google "James Cleverly," not "Sir James Cleverly."
 const HONORIFICS = ["Sir ", "Dame ", "Lord ", "Lady ", "Baroness ", "Baron "];
 function stripHonorific(name: string): string {
   for (const h of HONORIFICS) {
@@ -34,26 +27,6 @@ function stripHonorific(name: string): string {
   }
   return name;
 }
-
-const fullData = getFullData(CONSTITUENCY_SLUG);
-const constituencyName = fullData?.constituency?.name ?? "the local constituency";
-const mpNameRaw = fullData?.mp?.name ?? fullData?.constituency?.mp ?? "the local MP";
-const mpName = stripHonorific(mpNameRaw);
-
-const KEYWORDS = [
-  mpName,
-  constituencyName,
-  "cost of living",
-  "NHS",
-  "immigration",
-  "council tax",
-  "Reform UK",
-];
-
-const GEO_GB = "GB";
-const GEO_ENGLAND = "GB-ENG";
-const EAST_OF_ENGLAND_NAME = "East of England";
-const INTEREST_BY_REGION_DELAY_MS = 600;
 
 interface TrendingSearch {
   title: string;
@@ -70,7 +43,7 @@ interface InterestOverTimePoint {
 
 interface RegionalComparison {
   keyword: string;
-  eastOfEnglandValue: number | null;
+  regionValue: number | null;
   nationalAverage: number;
   rank: number | null;
   totalRegions: number;
@@ -115,12 +88,7 @@ async function safeDailyTrends(): Promise<TrendingSearch[]> {
         const relatedQueries = ((item?.relatedQueries as Array<{ query?: string }>) ?? [])
           .map((q) => q?.query ?? "")
           .filter(Boolean);
-        return {
-          title,
-          traffic,
-          articleCount: articles.length,
-          relatedQueries,
-        };
+        return { title, traffic, articleCount: articles.length, relatedQueries };
       })
       .filter((t: TrendingSearch) => t.title);
   } catch (err) {
@@ -129,7 +97,10 @@ async function safeDailyTrends(): Promise<TrendingSearch[]> {
   }
 }
 
-async function safeInterestOverTime(): Promise<InterestOverTimePoint[]> {
+async function safeInterestOverTime(
+  mpName: string,
+  constituencyName: string
+): Promise<InterestOverTimePoint[]> {
   try {
     const startTime = new Date();
     startTime.setDate(startTime.getDate() - 90);
@@ -158,14 +129,16 @@ async function safeInterestOverTime(): Promise<InterestOverTimePoint[]> {
   }
 }
 
-async function safeInterestByRegion(): Promise<RegionalComparison[]> {
+async function safeInterestByRegion(
+  keywords: string[],
+  regionName: string
+): Promise<RegionalComparison[]> {
   const startTime = new Date();
   startTime.setDate(startTime.getDate() - 90);
-
   const results: RegionalComparison[] = [];
 
-  for (let i = 0; i < KEYWORDS.length; i++) {
-    const keyword = KEYWORDS[i];
+  for (let i = 0; i < keywords.length; i++) {
+    const keyword = keywords[i];
     try {
       const raw = await googleTrends.interestByRegion({
         keyword,
@@ -186,21 +159,25 @@ async function safeInterestByRegion(): Promise<RegionalComparison[]> {
         ? values.reduce((a, b) => a + b, 0) / values.length
         : 0;
 
-      const eoe = withData.find((r) => r.geoName === EAST_OF_ENGLAND_NAME);
-      const eastOfEnglandValue = eoe?.value?.[0] ?? null;
+      const regionEntry = withData.find(
+        (r) => r.geoName?.toLowerCase() === regionName.toLowerCase()
+      );
+      const regionValue = regionEntry?.value?.[0] ?? null;
 
       let rank: number | null = null;
-      if (eastOfEnglandValue !== null && withData.length > 0) {
+      if (regionValue !== null && withData.length > 0) {
         const sorted = [...withData].sort(
           (a, b) => (b.value?.[0] ?? 0) - (a.value?.[0] ?? 0)
         );
-        const idx = sorted.findIndex((r) => r.geoName === EAST_OF_ENGLAND_NAME);
+        const idx = sorted.findIndex(
+          (r) => r.geoName?.toLowerCase() === regionName.toLowerCase()
+        );
         rank = idx >= 0 ? idx + 1 : null;
       }
 
       results.push({
         keyword,
-        eastOfEnglandValue,
+        regionValue,
         nationalAverage: Math.round(nationalAverage * 10) / 10,
         rank,
         totalRegions: withData.length,
@@ -209,7 +186,7 @@ async function safeInterestByRegion(): Promise<RegionalComparison[]> {
       console.error(`Trends: interestByRegion failed for "${keyword}":`, err);
     }
 
-    if (i < KEYWORDS.length - 1) {
+    if (i < keywords.length - 1) {
       await new Promise((r) => setTimeout(r, INTEREST_BY_REGION_DELAY_MS));
     }
   }
@@ -217,16 +194,19 @@ async function safeInterestByRegion(): Promise<RegionalComparison[]> {
   return results;
 }
 
-async function generateFreshData(): Promise<TrendsData | null> {
+async function generateFreshData(
+  mpName: string,
+  constituencyName: string,
+  region: string,
+  keywords: string[]
+): Promise<TrendsData | null> {
   const [trending, interest, regional] = await Promise.all([
     safeDailyTrends(),
-    safeInterestOverTime(),
-    safeInterestByRegion(),
+    safeInterestOverTime(mpName, constituencyName),
+    safeInterestByRegion(keywords, region),
   ]);
 
-  if (!trending.length && !interest.length && !regional.length) {
-    return null;
-  }
+  if (!trending.length && !interest.length && !regional.length) return null;
 
   return {
     trendingSearches: trending,
@@ -241,78 +221,74 @@ async function generateFreshData(): Promise<TrendsData | null> {
       interestOverTime: interest.length ? "ok" : "failed",
       regionalVsNational: regional.length ? "ok" : "failed",
     },
-    keywordsUsed: KEYWORDS,
+    keywordsUsed: keywords,
     mpName,
     constituencyName,
   };
 }
 
-async function fetchAndUpdateCache() {
-  try {
-    const fresh = await generateFreshData();
-    if (!fresh) return;
-
-    const existing = await getDoc(cacheDoc);
-    const existingData = existing.exists() ? existing.data().data : null;
-
-    if (existingData && JSON.stringify(existingData) === JSON.stringify(fresh)) {
-      return;
-    }
-
-    await setDoc(cacheDoc, {
-      data: fresh,
-      updated_at: new Date().toISOString(),
-    });
-  } catch (err) {
-    console.error("Background trends cache update failed:", err);
-  }
-}
-
-const EMPTY_PAYLOAD = {
-  trendingSearches: [],
-  interestOverTime: [],
-  regionalVsNational: [],
-  source: "Google Trends (via google-trends-api, last published 2020-12-28)",
-  sourceUrl: "https://trends.google.com",
-  note: "No cached data available and upstream fetch failed.",
-  keywordsUsed: KEYWORDS,
-  mpName,
-  constituencyName,
-};
-
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const forceRefresh = searchParams.get("refresh") === "true";
+  const constituencySlug = searchParams.get("constituency") || "braintree";
+  const force = searchParams.get("force") === "1";
+
+  const fullData = getFullData(constituencySlug);
+  if (!fullData) {
+    return Response.json({ error: "Invalid constituency slug" }, { status: 400 });
+  }
+
+  const constituencyName = fullData.constituency.name;
+  const mpNameRaw = fullData.mp?.name ?? fullData.constituency.mp;
+  const mpName = stripHonorific(mpNameRaw);
+  const region = fullData.constituency.region;
+
+  const keywords = [
+    mpName,
+    constituencyName,
+    "cost of living",
+    "NHS",
+    "immigration",
+    "council tax",
+    "Reform UK",
+  ];
+
+  const cacheDocRef = adminDb.collection("trends_cache").doc(constituencySlug);
 
   type CacheDoc = { data: Record<string, unknown>; updated_at: string };
   let cached: CacheDoc | null = null;
   try {
-    const snap = await getDoc(cacheDoc);
-    if (snap.exists()) {
-      cached = snap.data() as CacheDoc;
-    }
+    const snap = await cacheDocRef.get();
+    if (snap.exists) cached = snap.data() as CacheDoc;
   } catch (err) {
     console.warn("Trends cache read failed (continuing without cache):", err);
   }
 
-  if (cached && !forceRefresh) {
-    const ageMs = Date.now() - new Date(cached.updated_at).getTime();
-    if (ageMs > TTL_MS) {
-      fetchAndUpdateCache();
-    }
+  const cacheAge = cached ? Date.now() - new Date(cached.updated_at).getTime() : Infinity;
+  if (cached && (!force || cacheAge < TTL_MS)) {
     return NextResponse.json({ ...cached.data, cached: true });
   }
 
-  const fresh = await generateFreshData();
+  const fresh = await generateFreshData(mpName, constituencyName, region, keywords);
   if (!fresh) {
-    return NextResponse.json({ ...EMPTY_PAYLOAD, error: "Failed to fetch" }, { status: 500 });
+    return NextResponse.json(
+      {
+        trendingSearches: [],
+        interestOverTime: [],
+        regionalVsNational: [],
+        source: "Google Trends (via google-trends-api, last published 2020-12-28)",
+        sourceUrl: "https://trends.google.com",
+        note: "No cached data available and upstream fetch failed.",
+        keywordsUsed: keywords,
+        mpName,
+        constituencyName,
+        error: "Failed to fetch",
+      },
+      { status: 500 }
+    );
   }
 
   try {
-    await setDoc(cacheDoc, {
-      data: fresh,
-      updated_at: new Date().toISOString(),
-    });
+    await cacheDocRef.set({ data: fresh, updated_at: new Date().toISOString() });
   } catch (err) {
     console.warn("Trends cache write failed (returning fresh anyway):", err);
   }
