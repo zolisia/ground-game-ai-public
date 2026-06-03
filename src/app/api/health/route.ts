@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { doc, getDoc, setDoc, type DocumentReference } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { adminDb } from "@/lib/firebase-admin";
 import { getFullData } from "@/data";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +18,7 @@ export const dynamic = "force-dynamic";
 // we return an empty indicator list with a note rather than misattribute
 // Braintree's figures to another area.
 
-const TTL_MS = 24 * 60 * 60 * 1000;
+const TTL_MS = 30 * 24 * 60 * 60 * 1000; // Fingertips updates annually — monthly refresh is enough
 
 const FINGERTIPS_API = "https://fingertips.phe.org.uk/api";
 
@@ -212,34 +211,11 @@ function getFallbackData(
   };
 }
 
-async function fetchAndUpdateCache(
-  districtCode: string,
-  districtName: string,
-  constituencySlug: string,
-  cacheDocRef: DocumentReference
-) {
-  try {
-    const fresh = await generateFreshData(districtCode, districtName, constituencySlug);
-
-    const existing = await getDoc(cacheDocRef);
-    const existingData = existing.exists() ? existing.data().data : null;
-
-    if (existingData && JSON.stringify(existingData) === JSON.stringify(fresh)) {
-      return;
-    }
-
-    await setDoc(cacheDocRef, {
-      data: fresh,
-      updated_at: new Date().toISOString(),
-    });
-  } catch (err) {
-    console.error("Background health cache update failed:", err);
-  }
-}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const constituencySlug = searchParams.get("constituency") || "braintree";
+  const force = searchParams.get("force") === "1";
   const constituencyData = getFullData(constituencySlug);
 
   if (!constituencyData) {
@@ -268,24 +244,21 @@ export async function GET(request: Request) {
   const districtCode = primaryLad.code;
   const districtName = primaryLad.name;
 
-  const cacheDocRef = doc(db, "health_cache", constituencySlug);
+  const cacheDocRef = adminDb.collection("health_cache").doc(constituencySlug);
 
   type CacheDoc = { data: Record<string, unknown>; updated_at: string };
   let cached: CacheDoc | null = null;
   try {
-    const snap = await getDoc(cacheDocRef);
-    if (snap.exists()) {
+    const snap = await cacheDocRef.get();
+    if (snap.exists) {
       cached = snap.data() as CacheDoc;
     }
   } catch (err) {
     console.warn("Health cache read failed (continuing without cache):", err);
   }
 
-  if (cached) {
-    const ageMs = Date.now() - new Date(cached.updated_at).getTime();
-    if (ageMs > TTL_MS) {
-      fetchAndUpdateCache(districtCode, districtName, constituencySlug, cacheDocRef);
-    }
+  const cacheAge = cached ? Date.now() - new Date(cached.updated_at).getTime() : Infinity;
+  if (cached && (!force || cacheAge < TTL_MS)) {
     return NextResponse.json({ ...cached.data, source: "cache" });
   }
 
@@ -293,7 +266,7 @@ export async function GET(request: Request) {
     const fresh = await generateFreshData(districtCode, districtName, constituencySlug);
 
     try {
-      await setDoc(cacheDocRef, {
+      await cacheDocRef.set({
         data: fresh,
         updated_at: new Date().toISOString(),
       });

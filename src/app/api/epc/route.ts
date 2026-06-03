@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
+import { adminDb } from "@/lib/firebase-admin";
 import { getFullData } from "@/data";
 
-// Force dynamic — fetches live external data
 export const dynamic = "force-dynamic";
+
+const TTL_MS = 7 * 24 * 60 * 60 * 1000; // EPC aggregate stats change quarterly — weekly refresh is enough
 
 // Energy Performance Certificate (EPC) Open Data
 // Requires free API key from https://epc.opendatacommunities.org/
@@ -69,6 +71,7 @@ async function fetchEPCPage(
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const constituencySlug = searchParams.get("constituency") || "braintree";
+  const force = searchParams.get("force") === "1";
   const constituencyData = getFullData(constituencySlug);
 
   if (!constituencyData) {
@@ -98,6 +101,22 @@ export async function GET(request: Request) {
       },
       { status: 400 }
     );
+  }
+
+  const cacheDocRef = adminDb.collection("epc_cache").doc(constituencySlug);
+
+  type CacheDoc = { data: Record<string, unknown>; updated_at: string };
+  let cached: CacheDoc | null = null;
+  try {
+    const snap = await cacheDocRef.get();
+    if (snap.exists) cached = snap.data() as CacheDoc;
+  } catch (err) {
+    console.warn("EPC cache read failed (continuing without cache):", err);
+  }
+
+  const cacheAge = cached ? Date.now() - new Date(cached.updated_at).getTime() : Infinity;
+  if (cached && (!force || cacheAge < TTL_MS)) {
+    return NextResponse.json({ ...cached.data, source: "cache" });
   }
 
   const apiKey = process.env.EPC_API_KEY;
@@ -165,14 +184,14 @@ export async function GET(request: Request) {
         floorArea: r["total-floor-area"],
       }));
 
-    return NextResponse.json({
-      ratings,
-      totalAssessed,
-      poorlyRated,
-      recentAssessments,
-      source: "live",
-      sourceUrl: "https://epc.opendatacommunities.org/",
-    });
+    const fresh = { ratings, totalAssessed, poorlyRated, recentAssessments, sourceUrl: "https://epc.opendatacommunities.org/" };
+    try {
+      await cacheDocRef.set({ data: fresh, updated_at: new Date().toISOString() });
+    } catch (err) {
+      console.warn("EPC cache write failed (returning fresh anyway):", err);
+    }
+
+    return NextResponse.json({ ...fresh, source: "live" });
   } catch {
     return NextResponse.json(
       {
