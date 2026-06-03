@@ -159,7 +159,430 @@ async function fetchParliamentData(constituency: string): Promise<DataSection[]>
 // constituencies, returns an empty list — demographic comparison data has not
 // yet been sourced per-constituency, and showing Braintree's stats labelled as
 // another area would be misleading.
+// Census 2021 (ONS) + NOMIS APS + published government sources.
+// Fetched June 2026 via scripts/fetch-commons-profiles.ts.
+// Census metrics use LAD-level ONS data as a constituency-level proxy, except
+// Sheffield Central and Leeds Central which use ward-level aggregation.
+// Life expectancy: ONS Health State Life Expectancies 2021-23 by primary LAD.
+// IMD rank: Commons Library, English Deprivation by Constituency (IMD 2019).
+// Fuel poverty: DESNZ Sub-regional fuel poverty 2023. Child poverty: HMRC 2023.
 function getStaticProfile(constituencySlug: string): DataSection[] {
+  if (constituencySlug === "clacton") return [
+    {
+      heading: "Population & Demographics",
+      rows: [
+        { Measure: "Population (2021 Census)", Value: "98,187", England: "56,490,048", Region: "" },
+        { Measure: "Median age", Value: "45", England: "40", Region: "" },
+        { Measure: "Born in UK", Value: "95%", England: "83.4%", Region: "" },
+        { Measure: "White British", Value: "93.5%", England: "73.5%", Region: "" },
+      ],
+    },
+    {
+      heading: "Housing",
+      rows: [
+        { Measure: "Owner occupied", Value: "71.5%", England: "62.3%", Region: "" },
+        { Measure: "Social rented", Value: "8.2%", England: "17.1%", Region: "" },
+        { Measure: "Private rented", Value: "19.8%", England: "18.4%", Region: "" },
+      ],
+    },
+    {
+      heading: "Economy & Employment",
+      rows: [
+        { Measure: "Employment rate (16-64)", Value: "61.9%", England: "75.5%", Region: "" },
+        { Measure: "Unemployment rate", Value: "6.2%", England: "4.3%", Region: "" },
+        { Measure: "Median weekly pay", Value: "£692", England: "£640", Region: "" },
+      ],
+    },
+    {
+      heading: "Education",
+      rows: [
+        { Measure: "Degree or higher (16+)", Value: "19.9%", England: "33.8%", Region: "" },
+        { Measure: "No qualifications (16+)", Value: "26.2%", England: "18.2%", Region: "" },
+      ],
+    },
+    {
+      heading: "Health",
+      rows: [
+        { Measure: "Good or very good health", Value: "75.1%", England: "81.7%", Region: "" },
+        { Measure: "Bad or very bad health", Value: "7.8%", England: "5.2%", Region: "" },
+        { Measure: "Life expectancy (male)", Value: "77.2 years", England: "79.4 years", Region: "" },
+        { Measure: "Life expectancy (female)", Value: "81.6 years", England: "83.1 years", Region: "" },
+      ],
+    },
+    {
+      heading: "Deprivation",
+      rows: [
+        { Measure: "IMD rank (of 650)", Value: "108th (more deprived)", England: "", Region: "" },
+        { Measure: "Fuel poverty", Value: "17.4%", England: "13.1%", Region: "" },
+        { Measure: "Child poverty (after housing costs)", Value: "30.2%", England: "29.4%", Region: "" },
+      ],
+    },
+  ];
+
+  if (constituencySlug === "walthamstow") return [
+    {
+      heading: "Population & Demographics",
+      rows: [
+        { Measure: "Population (2021 Census)", Value: "159,620", England: "56,490,048", Region: "" },
+        { Measure: "Median age", Value: "37", England: "40", Region: "" },
+        { Measure: "Born in UK", Value: "61.4%", England: "83.4%", Region: "" },
+        { Measure: "White British", Value: "34%", England: "73.5%", Region: "" },
+      ],
+    },
+    {
+      heading: "Housing",
+      rows: [
+        { Measure: "Owner occupied", Value: "48.9%", England: "62.3%", Region: "" },
+        { Measure: "Social rented", Value: "21.5%", England: "17.1%", Region: "" },
+        { Measure: "Private rented", Value: "27.8%", England: "18.4%", Region: "" },
+      ],
+    },
+    {
+      heading: "Economy & Employment",
+      rows: [
+        { Measure: "Employment rate (16-64)", Value: "83.6%", England: "75.5%", Region: "" },
+        { Measure: "Unemployment rate", Value: "7.5%", England: "4.3%", Region: "" },
+        { Measure: "Median weekly pay", Value: "£729", England: "£640", Region: "" },
+      ],
+    },
+    {
+      heading: "Education",
+      rows: [
+        { Measure: "Degree or higher (16+)", Value: "43.2%", England: "33.8%", Region: "" },
+        { Measure: "No qualifications (16+)", Value: "18.2%", England: "18.2%", Region: "" },
+      ],
+    },
+    {
+      heading: "Health",
+      rows: [
+        { Measure: "Good or very good health", Value: "85%", England: "81.7%", Region: "" },
+        { Measure: "Bad or very bad health", Value: "4.4%", England: "5.2%", Region: "" },
+        { Measure: "Life expectancy (male)", Value: "79.0 years", England: "79.4 years", Region: "" },
+        { Measure: "Life expectancy (female)", Value: "83.3 years", England: "83.1 years", Region: "" },
+      ],
+    },
+    {
+      heading: "Deprivation",
+      rows: [
+        { Measure: "IMD rank (of 650)", Value: "182nd (more deprived)", England: "", Region: "" },
+        { Measure: "Fuel poverty", Value: "13.8%", England: "13.1%", Region: "" },
+        { Measure: "Child poverty (after housing costs)", Value: "41.8%", England: "29.4%", Region: "" },
+      ],
+    },
+  ];
+
+  if (constituencySlug === "sheffield-central") return [
+    {
+      heading: "Population & Demographics",
+      rows: [
+        { Measure: "Population (2021 Census)", Value: "89,943", England: "56,490,048", Region: "" },
+        { Measure: "Median age", Value: "40", England: "40", Region: "" },
+        { Measure: "Born in UK", Value: "72.8%", England: "83.4%", Region: "" },
+        { Measure: "White British", Value: "59.7%", England: "73.5%", Region: "" },
+      ],
+    },
+    {
+      heading: "Housing",
+      rows: [
+        { Measure: "Owner occupied", Value: "37.3%", England: "62.3%", Region: "" },
+        { Measure: "Social rented", Value: "17.2%", England: "17.1%", Region: "" },
+        { Measure: "Private rented", Value: "45%", England: "18.4%", Region: "" },
+      ],
+    },
+    {
+      heading: "Economy & Employment",
+      rows: [
+        { Measure: "Employment rate (16-64)", Value: "69.8%", England: "75.5%", Region: "" },
+        { Measure: "Unemployment rate", Value: "11.2%", England: "4.3%", Region: "" },
+        { Measure: "Median weekly pay", Value: "£721", England: "£640", Region: "" },
+      ],
+    },
+    {
+      heading: "Education",
+      rows: [
+        { Measure: "Degree or higher (16+)", Value: "45.6%", England: "33.8%", Region: "" },
+        { Measure: "No qualifications (16+)", Value: "10.3%", England: "18.2%", Region: "" },
+      ],
+    },
+    {
+      heading: "Health",
+      rows: [
+        { Measure: "Good or very good health", Value: "85.5%", England: "81.7%", Region: "" },
+        { Measure: "Bad or very bad health", Value: "4.1%", England: "5.2%", Region: "" },
+        { Measure: "Life expectancy (male)", Value: "77.5 years", England: "79.4 years", Region: "" },
+        { Measure: "Life expectancy (female)", Value: "82.0 years", England: "83.1 years", Region: "" },
+      ],
+    },
+    {
+      heading: "Deprivation",
+      rows: [
+        { Measure: "IMD rank (of 650)", Value: "32nd (most deprived)", England: "", Region: "" },
+        { Measure: "Fuel poverty", Value: "17.9%", England: "13.1%", Region: "" },
+        { Measure: "Child poverty (after housing costs)", Value: "46.1%", England: "29.4%", Region: "" },
+      ],
+    },
+  ];
+
+  if (constituencySlug === "leeds-central-and-headingley") return [
+    {
+      heading: "Population & Demographics",
+      rows: [
+        { Measure: "Population (2021 Census)", Value: "106,362", England: "56,490,048", Region: "" },
+        { Measure: "Median age", Value: "39", England: "40", Region: "" },
+        { Measure: "Born in UK", Value: "76.7%", England: "83.4%", Region: "" },
+        { Measure: "White British", Value: "63.8%", England: "73.5%", Region: "" },
+      ],
+    },
+    {
+      heading: "Housing",
+      rows: [
+        { Measure: "Owner occupied", Value: "31.9%", England: "62.3%", Region: "" },
+        { Measure: "Social rented", Value: "22.6%", England: "17.1%", Region: "" },
+        { Measure: "Private rented", Value: "44.8%", England: "18.4%", Region: "" },
+      ],
+    },
+    {
+      heading: "Economy & Employment",
+      rows: [
+        { Measure: "Employment rate (16-64)", Value: "63%", England: "75.5%", Region: "" },
+        { Measure: "Unemployment rate", Value: "13%", England: "4.3%", Region: "" },
+        { Measure: "Median weekly pay", Value: "£757", England: "£640", Region: "" },
+      ],
+    },
+    {
+      heading: "Education",
+      rows: [
+        { Measure: "Degree or higher (16+)", Value: "39.1%", England: "33.8%", Region: "" },
+        { Measure: "No qualifications (16+)", Value: "9.9%", England: "18.2%", Region: "" },
+      ],
+    },
+    {
+      heading: "Health",
+      rows: [
+        { Measure: "Good or very good health", Value: "86.4%", England: "81.7%", Region: "" },
+        { Measure: "Bad or very bad health", Value: "3.6%", England: "5.2%", Region: "" },
+        { Measure: "Life expectancy (male)", Value: "77.8 years", England: "79.4 years", Region: "" },
+        { Measure: "Life expectancy (female)", Value: "82.1 years", England: "83.1 years", Region: "" },
+      ],
+    },
+    {
+      heading: "Deprivation",
+      rows: [
+        { Measure: "IMD rank (of 650)", Value: "91st (more deprived)", England: "", Region: "" },
+        { Measure: "Fuel poverty", Value: "16.2%", England: "13.1%", Region: "" },
+        { Measure: "Child poverty (after housing costs)", Value: "41.2%", England: "29.4%", Region: "" },
+      ],
+    },
+  ];
+
+  if (constituencySlug === "south-basildon-and-east-thurrock") return [
+    {
+      heading: "Population & Demographics",
+      rows: [
+        { Measure: "Population (2021 Census)", Value: "107,000", England: "56,490,048", Region: "" },
+        { Measure: "Median age", Value: "38", England: "40", Region: "" },
+        { Measure: "Born in UK", Value: "79%", England: "83.4%", Region: "" },
+        { Measure: "White British", Value: "66.2%", England: "73.5%", Region: "" },
+      ],
+    },
+    {
+      heading: "Housing",
+      rows: [
+        { Measure: "Owner occupied", Value: "63.3%", England: "62.3%", Region: "" },
+        { Measure: "Social rented", Value: "17.7%", England: "17.1%", Region: "" },
+        { Measure: "Private rented", Value: "18.3%", England: "18.4%", Region: "" },
+      ],
+    },
+    {
+      heading: "Economy & Employment",
+      rows: [
+        { Measure: "Employment rate (16-64)", Value: "85.1%", England: "75.5%", Region: "" },
+        { Measure: "Unemployment rate", Value: "5.7%", England: "4.3%", Region: "" },
+        { Measure: "Median weekly pay", Value: "£758", England: "£640", Region: "" },
+      ],
+    },
+    {
+      heading: "Education",
+      rows: [
+        { Measure: "Degree or higher (16+)", Value: "26.2%", England: "33.8%", Region: "" },
+        { Measure: "No qualifications (16+)", Value: "21.6%", England: "18.2%", Region: "" },
+      ],
+    },
+    {
+      heading: "Health",
+      rows: [
+        { Measure: "Good or very good health", Value: "84.1%", England: "81.7%", Region: "" },
+        { Measure: "Bad or very bad health", Value: "4.3%", England: "5.2%", Region: "" },
+        { Measure: "Life expectancy (male)", Value: "78.8 years", England: "79.4 years", Region: "" },
+        { Measure: "Life expectancy (female)", Value: "82.8 years", England: "83.1 years", Region: "" },
+      ],
+    },
+    {
+      heading: "Deprivation",
+      rows: [
+        { Measure: "IMD rank (of 650)", Value: "319th (average)", England: "", Region: "" },
+        { Measure: "Fuel poverty", Value: "13.9%", England: "13.1%", Region: "" },
+        { Measure: "Child poverty (after housing costs)", Value: "28.7%", England: "29.4%", Region: "" },
+      ],
+    },
+  ];
+
+  if (constituencySlug === "great-yarmouth") return [
+    {
+      heading: "Population & Demographics",
+      rows: [
+        { Measure: "Population (2021 Census)", Value: "99,750", England: "56,490,048", Region: "" },
+        { Measure: "Median age", Value: "43", England: "40", Region: "" },
+        { Measure: "Born in UK", Value: "90.2%", England: "83.4%", Region: "" },
+        { Measure: "White British", Value: "88.9%", England: "73.5%", Region: "" },
+      ],
+    },
+    {
+      heading: "Housing",
+      rows: [
+        { Measure: "Owner occupied", Value: "61.8%", England: "62.3%", Region: "" },
+        { Measure: "Social rented", Value: "16.2%", England: "17.1%", Region: "" },
+        { Measure: "Private rented", Value: "21.5%", England: "18.4%", Region: "" },
+      ],
+    },
+    {
+      heading: "Economy & Employment",
+      rows: [
+        { Measure: "Employment rate (16-64)", Value: "72.3%", England: "75.5%", Region: "" },
+        { Measure: "Unemployment rate", Value: "7.5%", England: "4.3%", Region: "" },
+        { Measure: "Median weekly pay", Value: "£695", England: "£640", Region: "" },
+      ],
+    },
+    {
+      heading: "Education",
+      rows: [
+        { Measure: "Degree or higher (16+)", Value: "18.2%", England: "33.8%", Region: "" },
+        { Measure: "No qualifications (16+)", Value: "26.5%", England: "18.2%", Region: "" },
+      ],
+    },
+    {
+      heading: "Health",
+      rows: [
+        { Measure: "Good or very good health", Value: "76.1%", England: "81.7%", Region: "" },
+        { Measure: "Bad or very bad health", Value: "7.2%", England: "5.2%", Region: "" },
+        { Measure: "Life expectancy (male)", Value: "77.3 years", England: "79.4 years", Region: "" },
+        { Measure: "Life expectancy (female)", Value: "81.5 years", England: "83.1 years", Region: "" },
+      ],
+    },
+    {
+      heading: "Deprivation",
+      rows: [
+        { Measure: "IMD rank (of 650)", Value: "89th (more deprived)", England: "", Region: "" },
+        { Measure: "Fuel poverty", Value: "19.8%", England: "13.1%", Region: "" },
+        { Measure: "Child poverty (after housing costs)", Value: "36.4%", England: "29.4%", Region: "" },
+      ],
+    },
+  ];
+
+  if (constituencySlug === "streatham-and-croydon-north") return [
+    {
+      heading: "Population & Demographics",
+      rows: [
+        { Measure: "Population (2021 Census)", Value: "144,877", England: "56,490,048", Region: "" },
+        { Measure: "Median age", Value: "38", England: "40", Region: "" },
+        { Measure: "Born in UK", Value: "61.4%", England: "83.4%", Region: "" },
+        { Measure: "White British", Value: "37.6%", England: "73.5%", Region: "" },
+      ],
+    },
+    {
+      heading: "Housing",
+      rows: [
+        { Measure: "Owner occupied", Value: "33%", England: "62.3%", Region: "" },
+        { Measure: "Social rented", Value: "33.6%", England: "17.1%", Region: "" },
+        { Measure: "Private rented", Value: "31.4%", England: "18.4%", Region: "" },
+      ],
+    },
+    {
+      heading: "Economy & Employment",
+      rows: [
+        { Measure: "Employment rate (16-64)", Value: "81.9%", England: "75.5%", Region: "" },
+        { Measure: "Unemployment rate", Value: "7.3%", England: "4.3%", Region: "" },
+        { Measure: "Median weekly pay", Value: "£921", England: "£640", Region: "" },
+      ],
+    },
+    {
+      heading: "Education",
+      rows: [
+        { Measure: "Degree or higher (16+)", Value: "56.3%", England: "33.8%", Region: "" },
+        { Measure: "No qualifications (16+)", Value: "13.1%", England: "18.2%", Region: "" },
+      ],
+    },
+    {
+      heading: "Health",
+      rows: [
+        { Measure: "Good or very good health", Value: "86.5%", England: "81.7%", Region: "" },
+        { Measure: "Bad or very bad health", Value: "4%", England: "5.2%", Region: "" },
+        { Measure: "Life expectancy (male)", Value: "79.5 years", England: "79.4 years", Region: "" },
+        { Measure: "Life expectancy (female)", Value: "83.6 years", England: "83.1 years", Region: "" },
+      ],
+    },
+    {
+      heading: "Deprivation",
+      rows: [
+        { Measure: "IMD rank (of 650)", Value: "148th (more deprived)", England: "", Region: "" },
+        { Measure: "Fuel poverty", Value: "13.1%", England: "13.1%", Region: "" },
+        { Measure: "Child poverty (after housing costs)", Value: "40.3%", England: "29.4%", Region: "" },
+      ],
+    },
+  ];
+
+  if (constituencySlug === "lewisham-east") return [
+    {
+      heading: "Population & Demographics",
+      rows: [
+        { Measure: "Population (2021 Census)", Value: "117,190", England: "56,490,048", Region: "" },
+        { Measure: "Median age", Value: "37", England: "40", Region: "" },
+        { Measure: "Born in UK", Value: "64.4%", England: "83.4%", Region: "" },
+        { Measure: "White British", Value: "37.2%", England: "73.5%", Region: "" },
+      ],
+    },
+    {
+      heading: "Housing",
+      rows: [
+        { Measure: "Owner occupied", Value: "41.9%", England: "62.3%", Region: "" },
+        { Measure: "Social rented", Value: "29.2%", England: "17.1%", Region: "" },
+        { Measure: "Private rented", Value: "27.2%", England: "18.4%", Region: "" },
+      ],
+    },
+    {
+      heading: "Economy & Employment",
+      rows: [
+        { Measure: "Employment rate (16-64)", Value: "71.7%", England: "75.5%", Region: "" },
+        { Measure: "Unemployment rate", Value: "8.2%", England: "4.3%", Region: "" },
+        { Measure: "Median weekly pay", Value: "£829", England: "£640", Region: "" },
+      ],
+    },
+    {
+      heading: "Education",
+      rows: [
+        { Measure: "Degree or higher (16+)", Value: "49.8%", England: "33.8%", Region: "" },
+        { Measure: "No qualifications (16+)", Value: "14.6%", England: "18.2%", Region: "" },
+      ],
+    },
+    {
+      heading: "Health",
+      rows: [
+        { Measure: "Good or very good health", Value: "85.2%", England: "81.7%", Region: "" },
+        { Measure: "Bad or very bad health", Value: "4.3%", England: "5.2%", Region: "" },
+        { Measure: "Life expectancy (male)", Value: "79.6 years", England: "79.4 years", Region: "" },
+        { Measure: "Life expectancy (female)", Value: "83.7 years", England: "83.1 years", Region: "" },
+      ],
+    },
+    {
+      heading: "Deprivation",
+      rows: [
+        { Measure: "IMD rank (of 650)", Value: "160th (more deprived)", England: "", Region: "" },
+        { Measure: "Fuel poverty", Value: "13.4%", England: "13.1%", Region: "" },
+        { Measure: "Child poverty (after housing costs)", Value: "37.9%", England: "29.4%", Region: "" },
+      ],
+    },
+  ];
+
   if (constituencySlug !== "braintree") return [];
   return [
     {
