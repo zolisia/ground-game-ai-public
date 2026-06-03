@@ -290,7 +290,7 @@ export default function CommonsLibraryPanel() {
       {/* ── Economy ── */}
       <div className="bg-zinc-900 rounded-xl p-4">
         <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-3 font-medium">
-          💷 Jobs & Economy
+          Jobs & Economy
         </div>
         <div className="grid grid-cols-3 gap-3 mb-3">
           <div className="bg-zinc-800/50 rounded-lg p-2 text-center">
@@ -315,7 +315,7 @@ export default function CommonsLibraryPanel() {
       {/* ── Housing ── */}
       <div className="bg-zinc-900 rounded-xl p-4">
         <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-3 font-medium">
-          🏠 Housing Tenure
+          Housing Tenure
         </div>
         <div className="space-y-2">
           <div className="flex items-center gap-1">
@@ -330,7 +330,7 @@ export default function CommonsLibraryPanel() {
       {/* ── Health ── */}
       <div className="bg-zinc-900 rounded-xl p-4">
         <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-3 font-medium">
-          ❤️ Health & Wellbeing
+          Health & Wellbeing
         </div>
         <div className="grid grid-cols-2 gap-3 mb-3">
           <div className="bg-zinc-800/50 rounded-lg p-2 text-center">
@@ -353,7 +353,7 @@ export default function CommonsLibraryPanel() {
       {/* ── Education ── */}
       <div className="bg-zinc-900 rounded-xl p-4">
         <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-3 font-medium">
-          🎓 Education
+          Education
         </div>
         <div className="space-y-2">
           <div className="flex items-center gap-1">
@@ -368,7 +368,7 @@ export default function CommonsLibraryPanel() {
       {/* ── Deprivation ── */}
       <div className="bg-zinc-900 rounded-xl p-4">
         <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-3 font-medium">
-          📊 Deprivation
+          Deprivation
         </div>
         <div className="grid grid-cols-3 gap-3">
           <div className="bg-zinc-800/50 rounded-lg p-2 text-center">
@@ -391,7 +391,7 @@ export default function CommonsLibraryPanel() {
       {/* ── Transport ── */}
       <div className="bg-zinc-900 rounded-xl p-4">
         <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-3 font-medium">
-          🚌 Transport & Digital
+          Transport & Digital
         </div>
         <div className="space-y-2">
           {carOwn && <MiniBar label="Car ownership (1+ car)" value={carOwn} color="#22d3ee" />}
@@ -403,7 +403,7 @@ export default function CommonsLibraryPanel() {
       {/* ── Demographics ── */}
       <div className="bg-zinc-900 rounded-xl p-4">
         <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-3 font-medium">
-          👥 Demographics
+          Demographics
         </div>
         <div className="space-y-2">
           <div className="flex items-center gap-1">

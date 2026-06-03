@@ -18,17 +18,17 @@ interface LayerDef {
 }
 
 const LAYER_DEFS: LayerDef[] = [
-  { id: "boundary", label: "Boundary", emoji: "🗺️", description: "Constituency outline", default: true },
-  { id: "wards-vote", label: "2024 Vote Share", emoji: "🗳️", description: "Ward-level CON vote choropleth", default: true },
-  { id: "wards-prediction", label: "MRP Prediction", emoji: "📊", description: "EC predicted winner per ward", default: false },
-  { id: "wards-deprivation", label: "Deprivation", emoji: "📉", description: "Ward deprivation levels", default: false },
-  { id: "crime", label: "Crime Reports", emoji: "🔴", description: "Recent crime data (Police API)", default: false },
-  { id: "fixmystreet", label: "Community Issues", emoji: "⚠️", description: "FixMyStreet reports", default: false },
-  { id: "planning", label: "Planning Apps", emoji: "🏗️", description: "Recent planning applications", default: false },
-  { id: "worship", label: "Places of Worship", emoji: "⛪", description: "Religious buildings (OSM)", default: false },
-  { id: "floods", label: "Flood Monitoring", emoji: "🌊", description: "EA flood stations & alerts", default: false },
-  { id: "census", label: "Census Overlay", emoji: "📊", description: "ONS Census 2021 data", default: false },
-  { id: "ward-labels", label: "Ward Names", emoji: "🏷️", description: "Ward name labels", default: true },
+  { id: "boundary", label: "Boundary", description: "Constituency outline", default: true },
+  { id: "wards-vote", label: "2024 Vote Share", description: "Ward-level CON vote choropleth", default: true },
+  { id: "wards-prediction", label: "MRP Prediction", description: "EC predicted winner per ward", default: false },
+  { id: "wards-deprivation", label: "Deprivation", description: "Ward deprivation levels", default: false },
+  { id: "crime", label: "Crime Reports", description: "Recent crime data (Police API)", default: false },
+  { id: "fixmystreet", label: "Community Issues", description: "FixMyStreet reports", default: false },
+  { id: "planning", label: "Planning Apps", description: "Recent planning applications", default: false },
+  { id: "worship", label: "Places of Worship", description: "Religious buildings (OSM)", default: false },
+  { id: "floods", label: "Flood Monitoring", description: "EA flood stations & alerts", default: false },
+  { id: "census", label: "Census Overlay", description: "ONS Census 2021 data", default: false },
+  { id: "ward-labels", label: "Ward Names", description: "Ward name labels", default: true },
 ];
 
 interface BoundaryFeature {
@@ -391,7 +391,7 @@ export default function ConstituencyMap() {
                 <div style="flex:1; padding: 6px; border-radius: 6px; background: ${changed ? "rgba(239,68,68,0.1)" : "rgba(16,185,129,0.1)"}; text-align: center; border: 1px solid ${changed ? "rgba(239,68,68,0.3)" : "rgba(16,185,129,0.2)"};">
                   <div style="font-size: 9px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;">MRP Prediction</div>
                   <div style="font-size: 14px; font-weight: 700; color: ${predColor}; margin-top: 2px;">${props.predictedWinner}</div>
-                  ${changed ? '<div style="font-size: 9px; color: #ef4444; margin-top: 2px;">⚡ SWING</div>' : ""}
+                  ${changed ? '<div style="font-size: 9px; color: #ef4444; margin-top: 2px;">SWING</div>' : ""}
                 </div>
               </div>` : ""}
               ${props.conVote ? `
@@ -447,7 +447,7 @@ export default function ConstituencyMap() {
               .setPopup(
                 new maplibregl.Popup({ offset: 8, maxWidth: "220px" }).setHTML(
                   `<div style="font-family:system-ui;padding:4px;">
-                    <div style="font-weight:600;font-size:12px;color:#f1f5f9;margin-bottom:2px;">⚠️ ${issue.title}</div>
+                    <div style="font-weight:600;font-size:12px;color:#f1f5f9;margin-bottom:2px;">${issue.title}</div>
                     <div style="font-size:11px;color:#94a3b8;">${issue.category}</div>
                     <a href="${issue.url || `https://www.fixmystreet.com/report/${issue.id}`}" target="_blank" rel="noopener noreferrer" style="font-size:10px;color:#6ee7b7;text-decoration:none;margin-top:4px;display:inline-block;">View report ↗</a>
                   </div>`
@@ -489,7 +489,7 @@ export default function ConstituencyMap() {
               .setPopup(
                 new maplibregl.Popup({ offset: 6, maxWidth: "200px" }).setHTML(
                   `<div style="font-family:system-ui;padding:4px;">
-                    <div style="font-weight:600;font-size:12px;color:#f1f5f9;margin-bottom:2px;">🔴 ${crime.category}</div>
+                    <div style="font-weight:600;font-size:12px;color:#f1f5f9;margin-bottom:2px;">${crime.category}</div>
                     <div style="font-size:11px;color:#94a3b8;">${crime.street}</div>
                     ${crime.month ? `<div style="font-size:10px;color:#71717a;margin-top:2px;">${crime.month}</div>` : ""}
                     ${crime.outcome ? `<div style="font-size:10px;color:#a1a1aa;margin-top:1px;">Outcome: ${crime.outcome}</div>` : ""}
@@ -521,7 +521,7 @@ export default function ConstituencyMap() {
           for (const app of apps.slice(0, 30)) {
             if (!app.lat || !app.lng) continue;
             const color = planColors[app.type] || "#6b7280";
-            const statusIcon = app.status === "approved" ? "✅" : app.status === "refused" ? "❌" : app.status === "pending" ? "⏳" : "📋";
+            const statusIcon = app.status === "approved" ? "Approved" : app.status === "refused" ? "Refused" : app.status === "pending" ? "Pending" : "Unknown";
             const el = document.createElement("div");
             el.style.cssText = `width:10px;height:10px;background:${color};border:2px solid rgba(255,255,255,0.6);border-radius:2px;cursor:pointer;display:none;`;
             el.className = "planning-marker";
@@ -611,7 +611,7 @@ export default function ConstituencyMap() {
               .setPopup(
                 new maplibregl.Popup({ offset: 8, maxWidth: "220px" }).setHTML(
                   `<div style="font-family:system-ui;padding:4px;">
-                    <div style="font-weight:600;font-size:12px;color:#f1f5f9;margin-bottom:2px;">🌊 ${stn.label}</div>
+                    <div style="font-weight:600;font-size:12px;color:#f1f5f9;margin-bottom:2px;">${stn.label}</div>
                     <div style="font-size:11px;color:#94a3b8;">${stn.river || "Monitoring Station"}</div>
                     ${stn.latestValue !== null ? `<div style="font-size:11px;color:#60a5fa;margin-top:2px;">Latest: ${stn.latestValue} ${stn.unit}</div>` : ""}
                   </div>`
@@ -623,7 +623,7 @@ export default function ConstituencyMap() {
 
           // Show flood warnings if any
           for (const warning of (floodData.warnings || []).slice(0, 5)) {
-            console.log("⚠️ Flood warning:", warning.description);
+            console.log("Flood warning:", warning.description);
           }
         } catch {
           // Flood data optional
@@ -890,7 +890,7 @@ export default function ConstituencyMap() {
         const topItems = petitions.slice(0, 8);
         const popupHtml = `
           <div style="font-family:system-ui;padding:6px;max-width:280px;">
-            <div style="font-weight:700;font-size:13px;color:#f1f5f9;margin-bottom:4px;">📝 E-Petitions — Braintree</div>
+            <div style="font-weight:700;font-size:13px;color:#f1f5f9;margin-bottom:4px;">E-Petitions — Braintree</div>
             <div style="font-size:10px;color:#a78bfa;margin-bottom:6px;">${overIndexed.length} of ${petitions.length} petitions over-indexed locally</div>
             ${topItems.map((p) => `
               <div style="margin-bottom:5px;padding:4px;border-radius:3px;background:${p.overIndexed ? "rgba(139,92,246,0.12)" : "rgba(100,116,139,0.08)"};">
@@ -975,7 +975,7 @@ export default function ConstituencyMap() {
             .setPopup(
               new maplibregl.Popup({ offset: 8, maxWidth: "220px" }).setHTML(
                 `<div style="font-family:system-ui;padding:4px;">
-                  <div style="font-weight:600;font-size:12px;color:#f1f5f9;margin-bottom:4px;">🌬️ ${stn.name}</div>
+                  <div style="font-weight:600;font-size:12px;color:#f1f5f9;margin-bottom:4px;">${stn.name}</div>
                   ${paramsHtml || '<div style="font-size:11px;color:#64748b;">No recent readings</div>'}
                   <a href="https://openaq.org/locations/${stn.id}" target="_blank" rel="noopener noreferrer" style="font-size:10px;color:#6ee7b7;text-decoration:none;margin-top:4px;display:inline-block;">View on OpenAQ ↗</a>
                 </div>`

@@ -178,7 +178,6 @@ export default function ActivityCharts() {
         {/* Social Mentions Over Time */}
         {tab === "mentions" && mentionData.length === 0 && (
           <div className="flex flex-col items-center justify-center py-8 text-center">
-            <div className="text-2xl mb-2">📊</div>
             <p className="text-sm text-zinc-400 font-medium">Social mentions not yet configured</p>
             <p className="text-xs text-zinc-600 mt-1">Connect X API or Apify to track mentions over time</p>
           </div>
@@ -256,7 +255,6 @@ export default function ActivityCharts() {
         {/* Parliamentary Activity Over Time */}
         {tab === "parliament" && parliamentData.length === 0 && (
           <div className="flex flex-col items-center justify-center py-8 text-center">
-            <div className="text-2xl mb-2">🏛️</div>
             <p className="text-sm text-zinc-400 font-medium">No parliamentary activity data available</p>
             <p className="text-xs text-zinc-600 mt-1">Data will appear once voting records are fetched from Parliament API</p>
           </div>
@@ -310,7 +308,6 @@ export default function ActivityCharts() {
         {/* Voting Record Over Time */}
         {tab === "votes" && voteData.length === 0 && (
           <div className="flex flex-col items-center justify-center py-8 text-center">
-            <div className="text-2xl mb-2">🗳️</div>
             <p className="text-sm text-zinc-400 font-medium">No voting record data available</p>
             <p className="text-xs text-zinc-600 mt-1">Data will appear once voting records are fetched from Parliament API</p>
           </div>
