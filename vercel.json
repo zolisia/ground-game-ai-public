@@ -1,0 +1,16 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/warm-cache?scope=live",
+      "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/cron/warm-cache?scope=full",
+      "schedule": "0 */2 * * *"
+    },
+    {
+      "path": "/api/cache-warmup",
+      "schedule": "0 5 * * *"
+    }
+  ]
+}
