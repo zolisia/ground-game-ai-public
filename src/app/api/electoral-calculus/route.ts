@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getFullData } from "@/data";
+import { EC_NAME_OVERRIDES } from "@/data/ec-name-overrides";
 
 // Electoral Calculus scraper for constituency prediction data
 // Scrapes ward-level MRP estimates and constituency predictions
@@ -86,20 +87,7 @@ export async function GET(request: Request) {
   // slug ("witham") returns EC's "Seat not found" page (~680 bytes), which
   // previously fell through as an empty result. Map slug → EC name via the
   // data layer. `?seat=` is an escape-hatch for callers who already know the
-  // exact EC name.
-  //
-  // EC uses a "place-first" naming convention for several seats where the
-  // ONS/Parliament name leads with a direction — e.g. ONS "South Basildon
-  // and East Thurrock" becomes EC's "Basildon South and East Thurrock"
-  // (confirmed via electdata_2024.txt, SeatCode E14001480). The map below
-  // captures every known slug whose EC name diverges from
-  // `constituency.name`; add an entry when audit/electoral-calculus probes
-  // surface a new "Seat not found" 400. (EC's full seat list is at
-  // https://www.electoralcalculus.co.uk/electdata_2024.txt — `;`-delimited,
-  // Name in the first column.)
-  const EC_NAME_OVERRIDES: Record<string, string> = {
-    "south-basildon-and-east-thurrock": "Basildon South and East Thurrock",
-  };
+  // exact EC name. Full override map is in src/data/ec-name-overrides.ts.
 
   const explicitSeat = searchParams.get("seat");
   const constituencySlug = searchParams.get("constituency") || "braintree";
