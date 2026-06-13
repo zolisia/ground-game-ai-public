@@ -4,6 +4,7 @@ import { adminDb } from "@/lib/firebase-admin";
 import { getFullData } from "@/data";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 // Nomis / ONS Claimant Count — free, no auth required
 // Dataset NM_162_1: Claimant count by constituency (wpca24 geography type).

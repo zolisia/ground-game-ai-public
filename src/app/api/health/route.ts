@@ -3,6 +3,7 @@ import { adminDb } from "@/lib/firebase-admin";
 import { getFullData } from "@/data";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 // PHE / OHID Fingertips API — free, no auth required
 // https://fingertips.phe.org.uk/api/

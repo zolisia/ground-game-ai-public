@@ -4,6 +4,7 @@ import { getFullData } from "@/data";
 import googleTrends from "google-trends-api";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 // google-trends-api scrapes Google's private Trends endpoints and was last
 // published 2020-12-28, so any of the three section calls below can break

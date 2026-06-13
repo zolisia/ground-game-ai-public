@@ -4,6 +4,7 @@ import { adminDb } from "@/lib/firebase-admin";
 import { getFullData } from "@/data";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 // ONS Census 2021 API — free, no auth required
 // https://api.beta.ons.gov.uk/v1

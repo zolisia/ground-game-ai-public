@@ -4,6 +4,7 @@ import { adminDb } from "@/lib/firebase-admin";
 import { getFullData } from "@/data";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 // NOMIS (ONS) Labour Market Statistics — free, no auth required
 // Docs: https://www.nomisweb.co.uk/api/v01/

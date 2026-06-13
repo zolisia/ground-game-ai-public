@@ -5,6 +5,7 @@ import { adminDb } from "@/lib/firebase-admin";
 import { getFullData } from "@/data";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 // UK Police API — free, no auth required
 // Docs: https://data.police.uk/docs/
