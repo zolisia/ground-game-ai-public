@@ -416,17 +416,28 @@ export async function GET(request: Request) {
     if (snap.exists) cached = snap.data() as CacheDoc;
   } catch { /* continue without cache */ }
 
-  const cacheAge = cached ? Date.now() - new Date(cached.updated_at).getTime() : Infinity;
-  if (cached && !force && cacheAge < TTL_MS) {
-    return NextResponse.json({ ...cached.data, source: "cache" });
+  if (cached && !force) {
+    const cacheAge = Date.now() - new Date(cached.updated_at).getTime();
+    if (cacheAge > TTL_MS) {
+      (async () => {
+        try {
+          const fresh = await generateFreshData(constituencySlug, constituencyName, onsCode, wpca24Code, ladCode);
+          await cacheDocRef.set({ data: fresh, updated_at: new Date().toISOString() });
+        } catch (err) {
+          console.warn("Commons library background refresh failed:", err);
+        }
+      })();
+    }
+    return NextResponse.json({ ...cached.data, source: "cache", _cachedAt: new Date(cached.updated_at).getTime() });
   }
 
   try {
     const fresh = await generateFreshData(constituencySlug, constituencyName, onsCode, wpca24Code, ladCode);
+    const cachedAt = Date.now();
     try {
-      await cacheDocRef.set({ data: fresh, updated_at: new Date().toISOString() });
+      await cacheDocRef.set({ data: fresh, updated_at: new Date(cachedAt).toISOString() });
     } catch { /* cache write failure — return fresh anyway */ }
-    return NextResponse.json(fresh);
+    return NextResponse.json({ ...fresh, _cachedAt: cachedAt });
   } catch (err) {
     console.error("Commons Library API error:", err);
     return NextResponse.json(

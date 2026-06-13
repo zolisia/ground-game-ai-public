@@ -214,24 +214,35 @@ export async function GET(request: Request) {
     console.warn("CQC cache read failed (continuing without cache):", err);
   }
 
-  const cacheAge = cached ? Date.now() - new Date(cached.updated_at).getTime() : Infinity;
-  if (cached && (!force || cacheAge < TTL_MS)) {
-    return NextResponse.json({ ...cached.data, source: "cache" });
+  if (cached && !force) {
+    const cacheAge = Date.now() - new Date(cached.updated_at).getTime();
+    if (cacheAge > TTL_MS) {
+      (async () => {
+        try {
+          const fresh = await generateFreshData(postcodes, constituencySlug);
+          await cacheDocRef.set({ data: fresh, updated_at: new Date().toISOString() });
+        } catch (err) {
+          console.warn("CQC background refresh failed:", err);
+        }
+      })();
+    }
+    return NextResponse.json({ ...cached.data, source: "cache", _cachedAt: new Date(cached.updated_at).getTime() });
   }
 
   try {
     const fresh = await generateFreshData(postcodes, constituencySlug);
 
+    const cachedAt = Date.now();
     try {
       await cacheDocRef.set({
         data: fresh,
-        updated_at: new Date().toISOString(),
+        updated_at: new Date(cachedAt).toISOString(),
       });
     } catch (err) {
       console.warn("CQC cache write failed (returning fresh anyway):", err);
     }
 
-    return NextResponse.json(fresh);
+    return NextResponse.json({ ...fresh, _cachedAt: cachedAt });
   } catch {
     return NextResponse.json(getFallbackData(constituencySlug));
   }

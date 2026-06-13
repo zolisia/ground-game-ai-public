@@ -191,7 +191,12 @@ export async function GET(request: Request) {
   }
 
   if (cached && !force) {
-    return NextResponse.json({ ...cached.data, source: "cache" });
+    const cacheAge = Date.now() - new Date(cached.updated_at).getTime();
+    if (cacheAge > TTL_MS) {
+      fetchAndUpdateCache(bbox, constituencySlug, cacheDocRef)
+        .catch(err => console.warn("Planning background refresh failed:", err));
+    }
+    return NextResponse.json({ ...cached.data, source: "cache", _cachedAt: new Date(cached.updated_at).getTime() });
   }
 
   const fresh = await generateFreshData(bbox, constituencySlug);
@@ -199,16 +204,17 @@ export async function GET(request: Request) {
     return NextResponse.json({ applications: [], total: 0 });
   }
 
+  const cachedAt = Date.now();
   try {
     await cacheDocRef.set({
       data: fresh,
-      updated_at: new Date().toISOString(),
+      updated_at: new Date(cachedAt).toISOString(),
     });
   } catch (err) {
     console.warn("Planning cache write failed (returning fresh anyway):", err);
   }
 
-  return NextResponse.json(fresh);
+  return NextResponse.json({ ...fresh, _cachedAt: cachedAt });
 }
 
 function categoriseApplication(description: string): string {

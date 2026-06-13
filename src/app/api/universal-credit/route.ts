@@ -251,7 +251,12 @@ export async function GET(request: Request) {
   }
 
   if (cached && !force) {
-    return NextResponse.json({ ...cached.data, source: "cache" });
+    const cacheAge = Date.now() - new Date(cached.updated_at).getTime();
+    if (cacheAge > TTL_MS) {
+      fetchAndUpdateCache(cacheDocRef, CONSTITUENCY_CODE)
+        .catch(err => console.warn("Universal Credit background refresh failed:", err));
+    }
+    return NextResponse.json({ ...cached.data, source: "cache", _cachedAt: new Date(cached.updated_at).getTime() });
   }
 
   const fresh = await generateFreshData(CONSTITUENCY_CODE);
@@ -262,14 +267,15 @@ export async function GET(request: Request) {
     );
   }
 
+  const cachedAt = Date.now();
   try {
     await cacheDocRef.set({
       data: fresh,
-      updated_at: new Date().toISOString(),
+      updated_at: new Date(cachedAt).toISOString(),
     });
   } catch (err) {
     console.warn("Universal Credit cache write failed (returning fresh anyway):", err);
   }
 
-  return NextResponse.json(fresh);
+  return NextResponse.json({ ...fresh, _cachedAt: cachedAt });
 }

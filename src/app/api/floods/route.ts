@@ -6,6 +6,8 @@ import { getFullData } from "@/data";
 
 export const dynamic = "force-dynamic";
 
+const TTL_MS = 15 * 60 * 1000;
+
 const EA_API = "https://environment.data.gov.uk/flood-monitoring";
 // TODO: derive RADIUS_KM from constituency bbox size — fixed 20km may
 // over-fetch for tiny urban constituencies and under-fetch for huge rural
@@ -171,22 +173,28 @@ export async function GET(request: Request) {
   }
 
   if (cached && !force) {
-    return NextResponse.json({ ...cached.data, source: "cache" });
+    const cacheAge = Date.now() - new Date(cached.updated_at).getTime();
+    if (cacheAge > TTL_MS) {
+      fetchAndUpdateCache(CENTER_LAT, CENTER_LNG, constituencySlug, cacheDocRef)
+        .catch(err => console.warn("Floods background refresh failed:", err));
+    }
+    return NextResponse.json({ ...cached.data, source: "cache", _cachedAt: new Date(cached.updated_at).getTime() });
   }
 
   try {
     const freshData = await generateFreshData(CENTER_LAT, CENTER_LNG, constituencySlug);
 
+    const cachedAt = Date.now();
     try {
       await cacheDocRef.set({
         data: freshData,
-        updated_at: new Date().toISOString(),
+        updated_at: new Date(cachedAt).toISOString(),
       });
     } catch (err) {
       console.warn("Flood cache write failed (returning fresh anyway):", err);
     }
 
-    return NextResponse.json(freshData);
+    return NextResponse.json({ ...freshData, _cachedAt: cachedAt });
   } catch (err) {
     console.error("Flood monitoring error:", err);
     return NextResponse.json(

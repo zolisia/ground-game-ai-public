@@ -302,7 +302,12 @@ export async function GET(request: Request) {
   }
 
   if (cached && !force) {
-    return NextResponse.json({ ...cached.data, source: "cache" });
+    const cacheAge = Date.now() - new Date(cached.updated_at).getTime();
+    if (cacheAge > TTL_MS) {
+      fetchAndUpdateCache(samplePoints, constituencySlug, cacheDocRef)
+        .catch(err => console.warn("Crime background refresh failed:", err));
+    }
+    return NextResponse.json({ ...cached.data, source: "cache", _cachedAt: new Date(cached.updated_at).getTime() });
   }
 
   const fresh = await generateFreshData(samplePoints, constituencySlug);
@@ -311,14 +316,15 @@ export async function GET(request: Request) {
   }
 
   // Cache write is also best-effort — return the fresh data regardless.
+  const cachedAt = Date.now();
   try {
     await cacheDocRef.set({
       data: fresh,
-      updated_at: new Date().toISOString(),
+      updated_at: new Date(cachedAt).toISOString(),
     });
   } catch (err) {
     console.warn("Crime cache write failed (returning fresh anyway):", err);
   }
 
-  return NextResponse.json(fresh);
+  return NextResponse.json({ ...fresh, _cachedAt: cachedAt });
 }

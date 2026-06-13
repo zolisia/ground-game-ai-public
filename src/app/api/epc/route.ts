@@ -39,6 +39,44 @@ const NATIONAL_FALLBACK: BandCounts = {
   G: 1,
 };
 
+async function generateFreshEPCData(
+  postcodes: string[],
+  apiKey: string,
+  email: string
+): Promise<{ ratings: BandCounts; totalAssessed: number; poorlyRated: number; recentAssessments: object[]; sourceUrl: string } | null> {
+  try {
+    const results = await Promise.allSettled(postcodes.map((pc) => fetchEPCPage(pc, apiKey, email)));
+    const allRecords: EPCRecord[] = [];
+    for (const result of results) {
+      if (result.status === "fulfilled") allRecords.push(...result.value);
+    }
+    const ratings: BandCounts = { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0, G: 0 };
+    for (const record of allRecords) {
+      const band = record["current-energy-rating"]?.toUpperCase();
+      if (band && band in ratings) ratings[band]++;
+    }
+    const totalAssessed = Object.values(ratings).reduce((a, b) => a + b, 0);
+    const poorlyRatedCount = ratings.D + ratings.E + ratings.F + ratings.G;
+    const poorlyRated = totalAssessed > 0 ? Math.round((poorlyRatedCount / totalAssessed) * 1000) / 10 : 0;
+    const recentAssessments = allRecords
+      .filter((r) => r["lodgement-date"])
+      .sort((a, b) => b["lodgement-date"].localeCompare(a["lodgement-date"]))
+      .slice(0, 10)
+      .map((r) => ({
+        address: r.address,
+        postcode: r.postcode,
+        rating: r["current-energy-rating"],
+        efficiency: r["current-energy-efficiency"],
+        date: r["lodgement-date"],
+        propertyType: r["property-type"],
+        floorArea: r["total-floor-area"],
+      }));
+    return { ratings, totalAssessed, poorlyRated, recentAssessments, sourceUrl: "https://epc.opendatacommunities.org/" };
+  } catch {
+    return null;
+  }
+}
+
 async function fetchEPCPage(
   postcode: string,
   apiKey: string,
@@ -102,13 +140,23 @@ export async function GET(request: Request) {
     console.warn("EPC cache read failed (continuing without cache):", err);
   }
 
-  const cacheAge = cached ? Date.now() - new Date(cached.updated_at).getTime() : Infinity;
-  if (cached && (!force || cacheAge < TTL_MS)) {
-    return NextResponse.json({ ...cached.data, source: "cache" });
-  }
-
   const apiKey = process.env.EPC_API_KEY;
   const email = process.env.EPC_EMAIL ?? "";
+
+  if (cached && !force) {
+    const cacheAge = Date.now() - new Date(cached.updated_at).getTime();
+    if (cacheAge > TTL_MS && apiKey) {
+      (async () => {
+        try {
+          const fresh = await generateFreshEPCData(POSTCODES, apiKey, email);
+          if (fresh) await cacheDocRef.set({ data: fresh, updated_at: new Date().toISOString() });
+        } catch (err) {
+          console.warn("EPC background refresh failed:", err);
+        }
+      })();
+    }
+    return NextResponse.json({ ...cached.data, source: "cache", _cachedAt: new Date(cached.updated_at).getTime() });
+  }
 
   // If no API key, return a reasonable fallback
   if (!apiKey) {
@@ -129,57 +177,17 @@ export async function GET(request: Request) {
   }
 
   try {
-    // Fetch from all postcodes in parallel
-    const results = await Promise.allSettled(
-      POSTCODES.map((pc) => fetchEPCPage(pc, apiKey, email))
-    );
+    const fresh = await generateFreshEPCData(POSTCODES, apiKey, email);
+    if (!fresh) throw new Error("EPC fetch returned null");
 
-    const allRecords: EPCRecord[] = [];
-    for (const result of results) {
-      if (result.status === "fulfilled") {
-        allRecords.push(...result.value);
-      }
-    }
-
-    // Aggregate by EPC band
-    const ratings: BandCounts = { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0, G: 0 };
-    for (const record of allRecords) {
-      const band = record["current-energy-rating"]?.toUpperCase();
-      if (band && band in ratings) {
-        ratings[band]++;
-      }
-    }
-
-    const totalAssessed = Object.values(ratings).reduce((a, b) => a + b, 0);
-    const poorlyRatedCount = ratings.D + ratings.E + ratings.F + ratings.G;
-    const poorlyRated =
-      totalAssessed > 0
-        ? Math.round((poorlyRatedCount / totalAssessed) * 1000) / 10
-        : 0;
-
-    // Recent assessments (last 10 sorted by date)
-    const recentAssessments = allRecords
-      .filter((r) => r["lodgement-date"])
-      .sort((a, b) => b["lodgement-date"].localeCompare(a["lodgement-date"]))
-      .slice(0, 10)
-      .map((r) => ({
-        address: r.address,
-        postcode: r.postcode,
-        rating: r["current-energy-rating"],
-        efficiency: r["current-energy-efficiency"],
-        date: r["lodgement-date"],
-        propertyType: r["property-type"],
-        floorArea: r["total-floor-area"],
-      }));
-
-    const fresh = { ratings, totalAssessed, poorlyRated, recentAssessments, sourceUrl: "https://epc.opendatacommunities.org/" };
+    const cachedAt = Date.now();
     try {
-      await cacheDocRef.set({ data: fresh, updated_at: new Date().toISOString() });
+      await cacheDocRef.set({ data: fresh, updated_at: new Date(cachedAt).toISOString() });
     } catch (err) {
       console.warn("EPC cache write failed (returning fresh anyway):", err);
     }
 
-    return NextResponse.json({ ...fresh, source: "live" });
+    return NextResponse.json({ ...fresh, source: "live", _cachedAt: cachedAt });
   } catch {
     return NextResponse.json(
       {
