@@ -226,11 +226,22 @@ async function fetchNomisReport(wpca24Code: string | null): Promise<DataSection[
   const sections: DataSection[] = [];
 
   try {
-    const empRes = await fetch(
-      `${NOMIS_BASE}/dataset/NM_17_5.data.json?geography=2092957703&variable=45&measures=20599&time=latest`,
-      { next: { revalidate: 86400 }, signal: AbortSignal.timeout(8000) }
-    );
-    if (empRes.ok) {
+    const [empRes, ccRes, popRes] = await Promise.all([
+      fetch(
+        `${NOMIS_BASE}/dataset/NM_17_5.data.json?geography=2092957703&variable=45&measures=20599&time=latest`,
+        { next: { revalidate: 86400 }, signal: AbortSignal.timeout(8000) }
+      ).catch(() => null),
+      wpca24Code ? fetch(
+        `${NOMIS_BASE}/dataset/NM_162_1.data.json?geography=${wpca24Code}&time=latestMINUS2&measures=20100,20201&gender=0&age=0`,
+        { next: { revalidate: 86400 }, signal: AbortSignal.timeout(8000) }
+      ).catch(() => null) : null,
+      wpca24Code ? fetch(
+        `${NOMIS_BASE}/dataset/NM_2010_1.data.json?geography=${wpca24Code}&time=latest&measures=20100&gender=0&c_age=200`,
+        { next: { revalidate: 86400 }, signal: AbortSignal.timeout(8000) }
+      ).catch(() => null) : null,
+    ]);
+
+    if (empRes?.ok) {
       const obs = (await empRes.json())?.obs ?? [];
       if (obs.length > 0) {
         const val = obs[0]?.obs_value?.value;
@@ -241,16 +252,8 @@ async function fetchNomisReport(wpca24Code: string | null): Promise<DataSection[
         });
       }
     }
-  } catch { /* continue */ }
 
-  if (!wpca24Code) return sections;
-
-  try {
-    const ccRes = await fetch(
-      `${NOMIS_BASE}/dataset/NM_162_1.data.json?geography=${wpca24Code}&time=latestMINUS2&measures=20100,20201&gender=0&age=0`,
-      { next: { revalidate: 86400 }, signal: AbortSignal.timeout(8000) }
-    );
-    if (ccRes.ok) {
+    if (ccRes?.ok) {
       const obs = (await ccRes.json())?.obs ?? [];
       const rows: Record<string, string>[] = [];
       let date = "";
@@ -263,14 +266,8 @@ async function fetchNomisReport(wpca24Code: string | null): Promise<DataSection[
       }
       if (rows.length > 0) sections.push({ heading: "Claimant Count", rows });
     }
-  } catch { /* continue */ }
 
-  try {
-    const popRes = await fetch(
-      `${NOMIS_BASE}/dataset/NM_2010_1.data.json?geography=${wpca24Code}&time=latest&measures=20100&gender=0&c_age=200`,
-      { next: { revalidate: 86400 }, signal: AbortSignal.timeout(8000) }
-    );
-    if (popRes.ok) {
+    if (popRes?.ok) {
       const obs = (await popRes.json())?.obs ?? [];
       if (obs.length > 0) {
         const val = obs[0]?.obs_value?.value;
