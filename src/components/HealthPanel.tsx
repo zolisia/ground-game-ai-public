@@ -28,11 +28,12 @@ const significanceConfig = {
   unknown: { color: "text-zinc-500", bg: "bg-zinc-500", badge: "bg-zinc-500/20 text-zinc-500", label: "N/A" },
 };
 
-function ProgressBar({ value, englandAvg, unit, significance }: {
+function ProgressBar({ value, englandAvg, unit, significance, constituencyName }: {
   value: number | null;
   englandAvg: number | null;
   unit: string;
   significance: HealthIndicator["significance"];
+  constituencyName: string;
 }) {
   if (value === null) return null;
 
@@ -81,7 +82,7 @@ function ProgressBar({ value, englandAvg, unit, significance }: {
       {/* Labels under bar */}
       {englandAvg !== null && (
         <div className="flex justify-between text-[10px] text-zinc-500">
-          <span>Braintree: {value}{unit === "%" ? "%" : ""}</span>
+          <span>{constituencyName}: {value}{unit === "%" ? "%" : ""}</span>
           <span>England: {englandAvg}{unit === "%" ? "%" : ""}</span>
         </div>
       )}
@@ -90,7 +91,7 @@ function ProgressBar({ value, englandAvg, unit, significance }: {
 }
 
 export default function HealthPanel() {
-  const { slug } = useConstituency();
+  const { slug, name: constituencyName } = useConstituency();
   const [data, setData] = useState<HealthData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -225,6 +226,7 @@ export default function HealthPanel() {
                 englandAvg={indicator.englandAvg}
                 unit={indicator.unit}
                 significance={indicator.significance}
+                constituencyName={constituencyName}
               />
 
               {/* Period */}
