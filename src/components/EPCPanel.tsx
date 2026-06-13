@@ -61,11 +61,11 @@ export default function EPCPanel() {
   if (loading) {
     return (
       <div className="animate-pulse">
-        <div className="h-4 bg-zinc-800 rounded w-40 mb-4" />
-        <div className="h-16 bg-zinc-900 rounded-xl mb-3" />
+        <div className="h-4 bg-muted rounded w-40 mb-4" />
+        <div className="h-16 bg-muted rounded-xl mb-3" />
         <div className="space-y-2">
           {[...Array(7)].map((_, i) => (
-            <div key={i} className="h-6 bg-zinc-900 rounded-lg" />
+            <div key={i} className="h-6 bg-muted rounded-lg" />
           ))}
         </div>
       </div>
@@ -92,7 +92,7 @@ export default function EPCPanel() {
     <div className="space-y-4">
       {/* Headline stats */}
       <div className="grid grid-cols-2 gap-3">
-        <div className="bg-zinc-900 rounded-xl p-3">
+        <div className="bg-muted rounded-xl p-3">
           <div className="text-[10px] text-zinc-500 uppercase tracking-wider">
             Homes Assessed
           </div>
@@ -100,7 +100,7 @@ export default function EPCPanel() {
             {total.toLocaleString()}
           </div>
         </div>
-        <div className="bg-zinc-900 rounded-xl p-3">
+        <div className="bg-muted rounded-xl p-3">
           <div className="text-[10px] text-zinc-500 uppercase tracking-wider">
             Fuel Poverty Risk
           </div>
@@ -126,7 +126,7 @@ export default function EPCPanel() {
               >
                 {b.band}
               </span>
-              <div className="flex-1 h-4 bg-zinc-800 rounded-full overflow-hidden">
+              <div className="flex-1 h-4 bg-muted rounded-full overflow-hidden">
                 <div
                   className={`h-full rounded-full ${
                     BAND_COLORS[b.band] ?? "bg-zinc-500"
@@ -148,7 +148,7 @@ export default function EPCPanel() {
       </div>
 
       {/* Stacked bar summary */}
-      <div className="bg-zinc-900 rounded-xl p-3">
+      <div className="bg-muted rounded-xl p-3">
         <div className="flex h-4 rounded-full overflow-hidden">
           {bands.map((b) => (
             <div

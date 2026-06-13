@@ -64,7 +64,7 @@ function ProgressBar({ value, englandAvg, unit, significance }: {
   return (
     <div className="mt-1.5 space-y-1">
       {/* Bar */}
-      <div className="relative h-2 bg-zinc-800 rounded-full overflow-visible">
+      <div className="relative h-2 bg-muted rounded-full overflow-visible">
         <div
           className={`absolute top-0 left-0 h-full rounded-full ${config.bg} opacity-80`}
           style={{ width: `${localPct}%` }}
@@ -118,7 +118,7 @@ export default function HealthPanel() {
       <div className="p-4 space-y-3">
         <div className="text-xs text-zinc-500">Loading health data...</div>
         {[...Array(4)].map((_, i) => (
-          <div key={i} className="h-16 bg-zinc-800/50 rounded-lg animate-pulse" />
+          <div key={i} className="h-16 bg-muted/50 rounded-lg animate-pulse" />
         ))}
       </div>
     );
@@ -183,7 +183,7 @@ export default function HealthPanel() {
           return (
             <div
               key={indicator.id}
-              className="bg-zinc-900 border border-zinc-800 rounded-lg p-3"
+              className="bg-muted border border-border rounded-lg p-3"
             >
               {/* Header row */}
               <div className="flex items-start justify-between gap-2">

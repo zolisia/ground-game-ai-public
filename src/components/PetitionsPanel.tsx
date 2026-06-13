@@ -40,10 +40,10 @@ export default function PetitionsPanel() {
   if (loading) {
     return (
       <div className="animate-pulse">
-        <div className="h-4 bg-zinc-800 rounded w-40 mb-4" />
+        <div className="h-4 bg-muted rounded w-40 mb-4" />
         <div className="space-y-2">
           {[...Array(5)].map((_, i) => (
-            <div key={i} className="h-16 bg-zinc-900 rounded-xl" />
+            <div key={i} className="h-16 bg-muted rounded-xl" />
           ))}
         </div>
       </div>
@@ -75,7 +75,7 @@ export default function PetitionsPanel() {
     <div className="space-y-4">
       {/* Summary stats */}
       <div className="grid grid-cols-2 gap-3">
-        <div className="bg-zinc-900 rounded-xl p-3">
+        <div className="bg-muted rounded-xl p-3">
           <div className="text-[10px] text-zinc-500 uppercase tracking-wider">
             Local Signatures
           </div>
@@ -86,7 +86,7 @@ export default function PetitionsPanel() {
             Across {petitions.length} petitions
           </div>
         </div>
-        <div className="bg-zinc-900 rounded-xl p-3">
+        <div className="bg-muted rounded-xl p-3">
           <div className="text-[10px] text-zinc-500 uppercase tracking-wider">
             Most Over-indexed
           </div>
@@ -125,7 +125,7 @@ export default function PetitionsPanel() {
                     {p.title}
                   </div>
                   {/* Bar */}
-                  <div className="flex-1 h-5 bg-zinc-900 rounded overflow-hidden">
+                  <div className="flex-1 h-5 bg-muted rounded overflow-hidden">
                     <div
                       className="h-full bg-purple-600/70 rounded transition-all duration-500"
                       style={{ width: `${Math.max(pct, 2)}%` }}
@@ -156,7 +156,7 @@ export default function PetitionsPanel() {
                 href={p.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="block bg-zinc-900 rounded-xl px-3 py-2 hover:bg-zinc-800 transition-colors"
+                className="block bg-muted rounded-xl px-3 py-2 hover:bg-muted transition-colors"
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">

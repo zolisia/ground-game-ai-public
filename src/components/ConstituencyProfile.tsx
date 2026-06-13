@@ -39,7 +39,7 @@ export default function ConstituencyProfile() {
     <div className="p-4">
       <div className="grid grid-cols-2 gap-3">
         {stats.map((s) => (
-          <div key={s.label} className="bg-zinc-800/40 rounded-lg p-3">
+          <div key={s.label} className="bg-muted/40 rounded-lg p-3">
             <div className="flex items-center gap-1.5 text-zinc-500 mb-1">
               {s.icon}
               <span className="text-[11px] uppercase tracking-wide">{s.label}</span>
@@ -52,18 +52,18 @@ export default function ConstituencyProfile() {
         {localAuthorities.map((la) => (
           <span
             key={la}
-            className="text-[11px] bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded-full"
+            className="text-[11px] bg-muted text-zinc-400 px-2 py-0.5 rounded-full"
           >
             {la}
           </span>
         ))}
         {region && (
-          <span className="text-[11px] bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded-full">
+          <span className="text-[11px] bg-muted text-zinc-400 px-2 py-0.5 rounded-full">
             {region}
           </span>
         )}
         {county && (
-          <span className="text-[11px] bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded-full">
+          <span className="text-[11px] bg-muted text-zinc-400 px-2 py-0.5 rounded-full">
             {county}
           </span>
         )}

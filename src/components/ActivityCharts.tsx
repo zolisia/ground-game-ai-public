@@ -44,7 +44,7 @@ interface VoteDataPoint {
 function CustomTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ name: string; value: number; color: string }>; label?: string }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-[#1a1a1a] border border-zinc-700 px-3 py-2 text-xs">
+    <div className="bg-card border border-border px-3 py-2 text-xs">
       <p className="text-zinc-400 mb-1 font-medium">{label}</p>
       {payload.map((entry, i) => (
         <p key={i} className="flex items-center gap-2">
@@ -146,10 +146,10 @@ export default function ActivityCharts() {
         <div className="animate-pulse space-y-3">
           <div className="flex gap-2">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="h-6 w-28 bg-zinc-800 rounded" />
+              <div key={i} className="h-6 w-28 bg-muted rounded" />
             ))}
           </div>
-          <div className="h-48 bg-zinc-800/50 rounded" />
+          <div className="h-48 bg-muted/50 rounded" />
         </div>
       </div>
     );
@@ -158,7 +158,7 @@ export default function ActivityCharts() {
   return (
     <div>
       {/* Tab bar */}
-      <div className="flex border-b border-zinc-800">
+      <div className="flex border-b border-border">
         {tabs.map((t) => (
           <button
             key={t.id}
@@ -363,7 +363,7 @@ export default function ActivityCharts() {
 
 function StatBox({ label, value, negative }: { label: string; value: number | string; negative?: boolean }) {
   return (
-    <div className="bg-zinc-900/50 border border-zinc-800/50 px-3 py-2 text-center">
+    <div className="bg-muted/50 border border-border/50 px-3 py-2 text-center">
       <p className={`text-base font-bold ${negative ? "text-red-400" : "text-zinc-100"}`}>
         {value}
       </p>

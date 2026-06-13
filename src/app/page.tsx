@@ -70,7 +70,7 @@ import {
 export default function DashboardPage() {
   // useSearchParams must be wrapped in Suspense in the App Router.
   return (
-    <Suspense fallback={<div className="min-h-screen bg-[#0a0a0a]" />}>
+    <Suspense fallback={<div className="min-h-screen bg-background" />}>
       <Dashboard />
     </Suspense>
   );
@@ -119,7 +119,7 @@ function Dashboard() {
   );
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] flex flex-col">
+    <div className="min-h-screen bg-background flex flex-col">
       <Header
         activeTab={activeTab}
         onTabChange={setActiveTab}
@@ -128,7 +128,7 @@ function Dashboard() {
       />
 
       {dataCachedAt !== null && (
-        <div className="px-4 py-1 border-b border-[#1a1a1a]">
+        <div className="px-4 py-1 border-b border-border">
           <span className="text-[10px] text-zinc-600">{formatCachedAt(dataCachedAt)}</span>
         </div>
       )}

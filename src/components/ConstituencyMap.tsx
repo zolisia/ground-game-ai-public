@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import { useTheme } from "next-themes";
 import { constituencyGeo, wardData, wardElectoralCalc as fallbackWardElectoralCalc } from "@/data/braintree";
 import { Layers, ChevronDown, ChevronUp } from "lucide-react";
 import { useConstituency, withConstituency } from "@/hooks/useConstituency";
@@ -89,6 +90,7 @@ interface PlanningApp {
 
 export default function ConstituencyMap() {
   const { slug } = useConstituency();
+  const { resolvedTheme } = useTheme();
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const fmsMarkers = useRef<maplibregl.Marker[]>([]);
@@ -134,7 +136,9 @@ export default function ConstituencyMap() {
 
     const m = new maplibregl.Map({
       container: mapContainer.current,
-      style: "https://tiles.openfreemap.org/styles/dark",
+      style: resolvedTheme === "light"
+        ? "https://tiles.openfreemap.org/styles/liberty"
+        : "https://tiles.openfreemap.org/styles/dark",
       center,
       zoom,
       minZoom: 9,
@@ -636,7 +640,7 @@ export default function ConstituencyMap() {
       map.current?.remove();
       map.current = null;
     };
-  }, [slug]);
+  }, [slug, resolvedTheme]);
 
   // Sync layer visibility
   useEffect(() => {
@@ -984,31 +988,31 @@ export default function ConstituencyMap() {
       <div className="absolute top-3 left-3 z-10 w-52">
         <button
           onClick={() => setLayerPanel(!layerPanel)}
-          className="w-full flex items-center justify-between bg-zinc-900/95 backdrop-blur border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-200 font-medium hover:bg-zinc-800/95 transition-colors"
+          className="w-full flex items-center justify-between bg-card/95 backdrop-blur border border-border rounded-lg px-3 py-2 text-xs text-foreground font-medium hover:bg-muted/95 transition-colors"
         >
           <span className="flex items-center gap-1.5">
             <Layers className="h-3.5 w-3.5 text-emerald-400" />
             Layers
           </span>
-          {layerPanel ? <ChevronUp className="h-3.5 w-3.5 text-zinc-500" /> : <ChevronDown className="h-3.5 w-3.5 text-zinc-500" />}
+          {layerPanel ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
         </button>
 
         {layerPanel && (
-          <div className="mt-1 bg-zinc-900/95 backdrop-blur border border-zinc-700 rounded-lg overflow-hidden">
+          <div className="mt-1 bg-card/95 backdrop-blur border border-border rounded-lg overflow-hidden">
             {LAYER_DEFS.map((layer) => (
               <div key={layer.id}>
                 <label
-                  className="flex items-center gap-2 px-3 py-1.5 hover:bg-zinc-800/50 cursor-pointer transition-colors"
+                  className="flex items-center gap-2 px-3 py-1.5 hover:bg-muted/50 cursor-pointer transition-colors"
                 >
                   <input
                     type="checkbox"
                     checked={layers[layer.id] || false}
                     onChange={() => toggleLayer(layer.id)}
-                    className="w-3 h-3 rounded border-zinc-600 bg-zinc-800 text-emerald-500 focus:ring-0 focus:ring-offset-0 accent-emerald-500"
+                    className="w-3 h-3 rounded border-border bg-muted text-emerald-500 focus:ring-0 focus:ring-offset-0 accent-emerald-500"
                   />
 
                   <div className="flex-1 min-w-0">
-                    <div className="text-[11px] text-zinc-300">{layer.label}</div>
+                    <div className="text-[11px] text-foreground">{layer.label}</div>
                   </div>
                 </label>
                 {/* Census topic selector dropdown */}
@@ -1017,7 +1021,7 @@ export default function ConstituencyMap() {
                     <select
                       value={censusTopic}
                       onChange={(e) => setCensusTopic(e.target.value)}
-                      className="w-full text-[10px] bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-zinc-300 focus:outline-none focus:border-emerald-500"
+                      className="w-full text-[10px] bg-muted border border-border rounded px-2 py-1 text-foreground focus:outline-none focus:border-emerald-500"
                     >
                       <option value="age-under16">Age: Under 16</option>
                       <option value="age-over65">Age: Over 65</option>
@@ -1042,8 +1046,8 @@ export default function ConstituencyMap() {
 
       {/* Crime source link */}
       {layers["crime"] && (
-        <div className="absolute bottom-3 left-3 bg-zinc-900/95 backdrop-blur rounded-lg p-2 border border-zinc-700 z-10">
-          <div className="text-[10px] text-zinc-400 mb-1 font-medium">Crime Reports</div>
+        <div className="absolute bottom-3 left-3 bg-card/95 backdrop-blur rounded-lg p-2 border border-border z-10">
+          <div className="text-[10px] text-muted-foreground mb-1 font-medium">Crime Reports</div>
           <div className="flex flex-wrap gap-1.5 mb-1.5">
             {[
               { cat: "ASB", color: "#f59e0b" },
@@ -1055,7 +1059,7 @@ export default function ConstituencyMap() {
             ].map((c) => (
               <div key={c.cat} className="flex items-center gap-1">
                 <div className="h-2 w-2 rounded-full" style={{ background: c.color }} />
-                <span className="text-[9px] text-zinc-500">{c.cat}</span>
+                <span className="text-[9px] text-muted-foreground">{c.cat}</span>
               </div>
             ))}
           </div>
@@ -1067,10 +1071,10 @@ export default function ConstituencyMap() {
 
       {/* Dynamic Legend */}
       {activeChoropleth && (
-        <div className="absolute bottom-3 right-3 bg-zinc-900/95 backdrop-blur rounded-lg p-3 border border-zinc-700 z-10">
+        <div className="absolute bottom-3 right-3 bg-card/95 backdrop-blur rounded-lg p-3 border border-border z-10">
           {activeChoropleth === "vote" && (
             <>
-              <div className="text-xs text-zinc-400 mb-2 font-medium">CON Vote Share (2024)</div>
+              <div className="text-xs text-foreground mb-2 font-medium">CON Vote Share (2024)</div>
               <div className="flex items-center gap-0.5">
                 <div className="h-3 w-5 rounded-sm" style={{ background: "#e74c3c" }} />
                 <div className="h-3 w-5 rounded-sm" style={{ background: "#f39c12" }} />
@@ -1078,14 +1082,14 @@ export default function ConstituencyMap() {
                 <div className="h-3 w-5 rounded-sm" style={{ background: "#2471a3" }} />
                 <div className="h-3 w-5 rounded-sm" style={{ background: "#1a5276" }} />
               </div>
-              <div className="flex justify-between text-[10px] text-zinc-500 mt-1">
+              <div className="flex justify-between text-[10px] text-muted-foreground mt-1">
                 <span>30%</span><span>40%</span><span>50%</span>
               </div>
             </>
           )}
           {activeChoropleth === "prediction" && (
             <>
-              <div className="text-xs text-zinc-400 mb-2 font-medium">MRP Predicted Winner</div>
+              <div className="text-xs text-foreground mb-2 font-medium">MRP Predicted Winner</div>
               <div className="space-y-1">
                 {[
                   { party: "CON", color: "#0087DC" },
@@ -1094,7 +1098,7 @@ export default function ConstituencyMap() {
                 ].map((p) => (
                   <div key={p.party} className="flex items-center gap-1.5">
                     <div className="h-3 w-4 rounded-sm" style={{ background: p.color }} />
-                    <span className="text-[11px] text-zinc-400">{p.party}</span>
+                    <span className="text-[11px] text-foreground">{p.party}</span>
                   </div>
                 ))}
               </div>
@@ -1102,7 +1106,7 @@ export default function ConstituencyMap() {
           )}
           {activeChoropleth === "deprivation" && (
             <>
-              <div className="text-xs text-zinc-400 mb-2 font-medium">Deprivation Level</div>
+              <div className="text-xs text-foreground mb-2 font-medium">Deprivation Level</div>
               <div className="space-y-1">
                 {[
                   { level: "Low", color: "#10b981" },
@@ -1111,7 +1115,7 @@ export default function ConstituencyMap() {
                 ].map((d) => (
                   <div key={d.level} className="flex items-center gap-1.5">
                     <div className="h-3 w-4 rounded-sm" style={{ background: d.color }} />
-                    <span className="text-[11px] text-zinc-400">{d.level}</span>
+                    <span className="text-[11px] text-foreground">{d.level}</span>
                   </div>
                 ))}
               </div>
@@ -1119,8 +1123,8 @@ export default function ConstituencyMap() {
           )}
           {activeChoropleth === "census" && (
             <>
-              <div className="text-xs text-zinc-400 mb-1 font-medium">Census 2021</div>
-              <div className="text-[10px] text-zinc-300 mb-2">{censusLabel}</div>
+              <div className="text-xs text-foreground mb-1 font-medium">Census 2021</div>
+              <div className="text-[10px] text-muted-foreground mb-2">{censusLabel}</div>
               <div className="flex items-center gap-0.5">
                 <div className="h-3 w-4 rounded-sm" style={{ background: "#1b263b" }} />
                 <div className="h-3 w-4 rounded-sm" style={{ background: "#415a77" }} />
@@ -1130,10 +1134,10 @@ export default function ConstituencyMap() {
                 <div className="h-3 w-4 rounded-sm" style={{ background: "#e76f51" }} />
                 <div className="h-3 w-4 rounded-sm" style={{ background: "#d62828" }} />
               </div>
-              <div className="flex justify-between text-[10px] text-zinc-500 mt-1">
+              <div className="flex justify-between text-[10px] text-muted-foreground mt-1">
                 <span>Low</span><span>Avg: {censusAvg}%</span><span>High</span>
               </div>
-              <div className="text-[9px] text-zinc-600 mt-1.5">Source: ONS Census 2021</div>
+              <div className="text-[9px] text-muted-foreground mt-1.5">Source: ONS Census 2021</div>
             </>
           )}
         </div>

@@ -109,15 +109,15 @@ export default function CQCPanel() {
   if (loading) {
     return (
       <div className="animate-pulse">
-        <div className="h-4 bg-zinc-800 rounded w-40 mb-4" />
+        <div className="h-4 bg-muted rounded w-40 mb-4" />
         <div className="grid grid-cols-4 gap-3 mb-4">
           {[...Array(4)].map((_, i) => (
-            <div key={i} className="h-16 bg-zinc-900 rounded-xl" />
+            <div key={i} className="h-16 bg-muted rounded-xl" />
           ))}
         </div>
         <div className="space-y-2">
           {[...Array(5)].map((_, i) => (
-            <div key={i} className="h-12 bg-zinc-900 rounded-xl" />
+            <div key={i} className="h-12 bg-muted rounded-xl" />
           ))}
         </div>
       </div>
@@ -189,7 +189,7 @@ export default function CQCPanel() {
             {locations.map((loc, i) => (
               <div
                 key={i}
-                className="bg-zinc-900 rounded-xl px-3 py-2 flex items-center justify-between gap-2"
+                className="bg-muted rounded-xl px-3 py-2 flex items-center justify-between gap-2"
               >
                 <div className="min-w-0 flex-1">
                   <div className="text-xs text-zinc-200 truncate">

@@ -143,7 +143,7 @@ function CustomTooltip({
 }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-[#1a1a1a] border border-zinc-700 px-3 py-2 text-xs shadow-lg">
+    <div className="bg-card border border-border px-3 py-2 text-xs shadow-lg">
       <p className="text-zinc-400 mb-1 font-medium">{label}</p>
       {payload.map((entry, i) => (
         <p key={i} className="flex items-center gap-2">
@@ -172,7 +172,7 @@ function TrackerTooltip({
 }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-[#1a1a1a] border border-zinc-700 px-3 py-2 text-xs shadow-lg">
+    <div className="bg-card border border-border px-3 py-2 text-xs shadow-lg">
       <p className="text-zinc-400 mb-1">{label}</p>
       {payload.map((entry, i) => (
         <p key={i} className="text-zinc-200 font-bold">
@@ -237,13 +237,13 @@ export default function PollingDashboard() {
       <div className="p-4 space-y-4">
         <div className="animate-pulse flex gap-2">
           {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="h-7 w-24 bg-zinc-800 rounded" />
+            <div key={i} className="h-7 w-24 bg-muted rounded" />
           ))}
         </div>
-        <div className="animate-pulse h-64 bg-zinc-800/50 rounded" />
+        <div className="animate-pulse h-64 bg-muted/50 rounded" />
         <div className="animate-pulse grid grid-cols-5 gap-2">
           {[1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className="h-20 bg-zinc-800/30 rounded" />
+            <div key={i} className="h-20 bg-muted/30 rounded" />
           ))}
         </div>
       </div>
@@ -255,7 +255,7 @@ export default function PollingDashboard() {
   return (
     <div>
       {/* Section tabs */}
-      <div className="flex border-b border-zinc-800">
+      <div className="flex border-b border-border">
         {sections.map((s) => (
           <button
             key={s.id}
@@ -286,7 +286,7 @@ export default function PollingDashboard() {
                 return (
                   <div
                     key={party}
-                    className="bg-zinc-900/50 border border-zinc-800/50 px-3 py-3 text-center relative overflow-hidden"
+                    className="bg-muted/50 border border-border/50 px-3 py-3 text-center relative overflow-hidden"
                   >
                     <div
                       className="absolute bottom-0 left-0 right-0 opacity-15"
@@ -362,7 +362,7 @@ export default function PollingDashboard() {
               <div className="overflow-x-auto">
                 <table className="w-full text-[11px]">
                   <thead>
-                    <tr className="border-b border-zinc-800">
+                    <tr className="border-b border-border">
                       <th className="text-left py-1.5 px-2 text-zinc-500 font-medium">Date</th>
                       <th className="text-left py-1.5 px-2 text-zinc-500 font-medium">Pollster</th>
                       <th className="text-center py-1.5 px-2 font-medium" style={{ color: PARTY_COLORS.con }}>CON</th>
@@ -377,7 +377,7 @@ export default function PollingDashboard() {
                     {data.polls.slice(0, 12).map((poll, i) => (
                       <tr
                         key={i}
-                        className="border-b border-zinc-800/30 hover:bg-zinc-800/20 transition-colors"
+                        className="border-b border-border/30 hover:bg-muted/20 transition-colors"
                       >
                         <td className="py-1.5 px-2 text-zinc-400">{poll.date}</td>
                         <td className="py-1.5 px-2 text-zinc-300 font-medium">{poll.pollster}</td>
@@ -428,7 +428,7 @@ export default function PollingDashboard() {
                 const barWidth = Math.min(Math.abs(leader.rating) * 2, 100);
                 const isNegative = leader.rating < 0;
                 return (
-                  <div key={leader.name} className="bg-zinc-900/50 border border-zinc-800/50 px-4 py-3">
+                  <div key={leader.name} className="bg-muted/50 border border-border/50 px-4 py-3">
                     <div className="flex items-center justify-between mb-2">
                       <div>
                         <span className="text-sm text-zinc-200 font-medium">{leader.name}</span>
@@ -458,7 +458,7 @@ export default function PollingDashboard() {
                       </div>
                     </div>
                     {/* Bar visualization */}
-                    <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
+                    <div className="h-2 bg-muted rounded-full overflow-hidden">
                       <div
                         className="h-full rounded-full transition-all duration-700"
                         style={{
@@ -478,7 +478,7 @@ export default function PollingDashboard() {
               })}
             </div>
 
-            <div className="bg-zinc-900/30 border border-zinc-800/50 px-4 py-3">
+            <div className="bg-muted/30 border border-border/50 px-4 py-3">
               <p className="text-[11px] text-zinc-400 mb-2 font-medium">Best Prime Minister</p>
               <div className="grid grid-cols-3 gap-3">
                 <div className="text-center">
@@ -553,7 +553,7 @@ export default function PollingDashboard() {
               {data.mii.slice(0, 6).map((issue) => (
                 <div
                   key={issue.issue}
-                  className="flex items-center justify-between bg-zinc-900/30 border border-zinc-800/50 px-3 py-2"
+                  className="flex items-center justify-between bg-muted/30 border border-border/50 px-3 py-2"
                 >
                   <span className="text-[11px] text-zinc-300">{issue.issue}</span>
                   <span className="flex items-center gap-1 text-[10px]">
@@ -706,7 +706,7 @@ function SeatProjectionSection({ averages, ecNational }: { averages: Record<stri
       </div>
 
       {/* Majority indicator */}
-      <div className="bg-zinc-900/50 border border-zinc-800/50 px-4 py-3 text-center">
+      <div className="bg-muted/50 border border-border/50 px-4 py-3 text-center">
         <p className="text-[10px] text-zinc-600 uppercase tracking-wider mb-1">Projected Outcome</p>
         <p className="text-lg font-black" style={{ color: largestParty.color }}>
           {useEC && ecNational?.outcome
@@ -761,7 +761,7 @@ function SeatProjectionSection({ averages, ecNational }: { averages: Record<stri
       {/* Seat cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
         {sorted.filter(p => p.seats > 0).map((p) => (
-          <div key={p.party} className="bg-zinc-900/30 border border-zinc-800/50 px-3 py-2 text-center">
+          <div key={p.party} className="bg-muted/30 border border-border/50 px-3 py-2 text-center">
             <p className="text-xl font-black" style={{ color: p.color }}>{p.seats}</p>
             <p className="text-[10px] text-zinc-500">{p.party}</p>
             <p className={`text-[10px] ${p.change > 0 ? "text-emerald-500" : p.change < 0 ? "text-red-400" : "text-zinc-600"}`}>
@@ -779,7 +779,7 @@ function SeatProjectionSection({ averages, ecNational }: { averages: Record<stri
             {(["reform", "con", "lab", "ld", "green"] as const).map((party) => {
               const pct = ecVote[party] || 0;
               return (
-                <div key={party} className="bg-zinc-900/30 border border-zinc-800/50 px-2 py-2 text-center">
+                <div key={party} className="bg-muted/30 border border-border/50 px-2 py-2 text-center">
                   <p className="text-sm font-bold" style={{ color: PARTY_COLORS[party] }}>
                     {pct}%
                   </p>
@@ -798,7 +798,7 @@ function SeatProjectionSection({ averages, ecNational }: { averages: Record<stri
           {(["reform", "con", "lab", "ld", "green"] as const).map((party) => {
             const swing = swings[party];
             return (
-              <div key={party} className="bg-zinc-900/30 border border-zinc-800/50 px-2 py-2 text-center">
+              <div key={party} className="bg-muted/30 border border-border/50 px-2 py-2 text-center">
                 <p className={`text-sm font-bold ${swing > 0 ? "text-emerald-400" : swing < 0 ? "text-red-400" : "text-zinc-400"}`}>
                   {swing > 0 ? "+" : ""}{swing.toFixed(1)}%
                 </p>
@@ -956,7 +956,7 @@ function BraintreeLocalSection({ averages, ecConstituency, constituencyName }: {
               <div key={party} className="flex items-center gap-3">
                 <span className="text-[10px] text-zinc-500 w-20 text-right uppercase">{PARTY_NAMES[party]}</span>
                 <div className="flex-1 flex items-center gap-2">
-                  <div className="flex-1 h-4 bg-zinc-800 rounded-sm overflow-hidden relative">
+                  <div className="flex-1 h-4 bg-muted rounded-sm overflow-hidden relative">
                     <div
                       className="h-full rounded-sm opacity-40"
                       style={{ width: `${actual * 2}%`, backgroundColor: PARTY_COLORS[party] }}
@@ -990,19 +990,19 @@ function BraintreeLocalSection({ averages, ecConstituency, constituencyName }: {
 
       {/* Key stats */}
       <div className="grid grid-cols-3 gap-2">
-        <div className="bg-zinc-900/30 border border-zinc-800/50 px-3 py-2 text-center">
+        <div className="bg-muted/30 border border-border/50 px-3 py-2 text-center">
           <p className="text-base font-bold text-zinc-100">
             {(useEC && ecConstituency!.electorate > 0 ? ecConstituency!.electorate : BRAINTREE_2024.electorate).toLocaleString()}
           </p>
           <p className="text-[9px] text-zinc-600 uppercase tracking-wider">Electorate</p>
         </div>
-        <div className="bg-zinc-900/30 border border-zinc-800/50 px-3 py-2 text-center">
+        <div className="bg-muted/30 border border-border/50 px-3 py-2 text-center">
           <p className="text-base font-bold text-zinc-100">
             {(useEC && ecConstituency!.turnout > 0 ? ecConstituency!.turnout : BRAINTREE_2024.turnout)}%
           </p>
           <p className="text-[9px] text-zinc-600 uppercase tracking-wider">2024 Turnout</p>
         </div>
-        <div className="bg-zinc-900/30 border border-zinc-800/50 px-3 py-2 text-center">
+        <div className="bg-muted/30 border border-border/50 px-3 py-2 text-center">
           <p className="text-base font-bold text-zinc-100">{BRAINTREE_2024.majority.toLocaleString()}</p>
           <p className="text-[9px] text-zinc-600 uppercase tracking-wider">2024 Majority</p>
         </div>
@@ -1010,7 +1010,7 @@ function BraintreeLocalSection({ averages, ecConstituency, constituencyName }: {
 
       {/* Ward-level breakdown (EC MRP only) */}
       {hasWards && (
-        <div className="bg-zinc-900/30 border border-zinc-800/50 px-4 py-3">
+        <div className="bg-muted/30 border border-border/50 px-4 py-3">
           <p className="text-[11px] text-zinc-400 font-medium mb-2">Ward-Level Predictions (MRP)</p>
           <div className="grid grid-cols-2 lg:grid-cols-3 gap-1.5 max-h-48 overflow-y-auto">
             {ecConstituency!.wards.map((ward) => {
@@ -1019,7 +1019,7 @@ function BraintreeLocalSection({ averages, ecConstituency, constituencyName }: {
               return (
                 <div
                   key={ward.ward}
-                  className="flex items-center justify-between bg-zinc-800/30 px-2 py-1.5 rounded-sm"
+                  className="flex items-center justify-between bg-muted/30 px-2 py-1.5 rounded-sm"
                 >
                   <span className="text-[10px] text-zinc-300 truncate flex-1">{ward.ward}</span>
                   <div className="flex items-center gap-1 ml-2">
@@ -1039,7 +1039,7 @@ function BraintreeLocalSection({ averages, ecConstituency, constituencyName }: {
       )}
 
       {/* Vulnerability analysis */}
-      <div className="bg-zinc-900/30 border border-zinc-800/50 px-4 py-3">
+      <div className="bg-muted/30 border border-border/50 px-4 py-3">
         <p className="text-[11px] text-zinc-400 font-medium mb-2">Vulnerability Analysis</p>
         <div className="space-y-1.5 text-[11px]">
           <div className="flex justify-between">
@@ -1107,7 +1107,7 @@ function TrackerChart({
   const change = latest - previous;
 
   return (
-    <div className="bg-zinc-900/30 border border-zinc-800/50 px-4 py-3">
+    <div className="bg-muted/30 border border-border/50 px-4 py-3">
       <div className="flex items-center justify-between mb-2">
         <div>
           <p className="text-xs text-zinc-300 font-medium">{title}</p>

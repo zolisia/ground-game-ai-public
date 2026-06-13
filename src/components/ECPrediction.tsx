@@ -106,7 +106,7 @@ export default function ECPrediction() {
   return (
     <div className="space-y-4">
       {/* Headline prediction */}
-      <div className="bg-zinc-800/30 rounded-lg p-3">
+      <div className="bg-muted/30 rounded-lg p-3">
         <div className="text-xs text-zinc-500 mb-1">Constituency Prediction</div>
         <div className="text-lg font-bold text-cyan-400">{pred.prediction}</div>
         <div className="flex gap-3 mt-2">
@@ -134,7 +134,7 @@ export default function ECPrediction() {
             .map(([party, share]) => (
               <div key={party} className="flex items-center gap-2">
                 <span className="text-[11px] text-zinc-400 w-14">{party}</span>
-                <div className="flex-1 bg-zinc-800 rounded-full h-4 overflow-hidden">
+                <div className="flex-1 bg-muted rounded-full h-4 overflow-hidden">
                   <div
                     className="h-full rounded-full transition-all"
                     style={{
@@ -159,7 +159,7 @@ export default function ECPrediction() {
           {Object.entries(wardCounts)
             .sort((a, b) => b[1] - a[1])
             .map(([party, count]) => (
-              <div key={party} className="bg-zinc-800/30 rounded-lg p-2 text-center">
+              <div key={party} className="bg-muted/30 rounded-lg p-2 text-center">
                 <div className="text-lg font-bold" style={{ color: partyColors[party] || "#999" }}>
                   {count}
                 </div>
@@ -176,7 +176,7 @@ export default function ECPrediction() {
       <div className="overflow-x-auto">
         <table className="w-full text-[11px]">
           <thead>
-            <tr className="text-zinc-500 border-b border-zinc-800">
+            <tr className="text-zinc-500 border-b border-border">
               <th className="text-left py-1 font-medium">Ward</th>
               <th className="text-center py-1 font-medium">2024</th>
               <th className="text-center py-1 font-medium">Pred</th>
@@ -187,7 +187,7 @@ export default function ECPrediction() {
             {wards.map(([name, data]) => {
               const changed = data.winner2024 !== data.predictedWinner;
               return (
-                <tr key={name} className={`border-b border-zinc-800/30 ${changed ? "bg-zinc-800/20" : ""}`}>
+                <tr key={name} className={`border-b border-border/30 ${changed ? "bg-muted/20" : ""}`}>
                   <td className="py-1 text-zinc-300">{name}</td>
                   <td className="text-center">
                     <span

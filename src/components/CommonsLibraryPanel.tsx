@@ -89,7 +89,7 @@ function MiniBar({ label, value, max = 100, color = "#34d399" }: { label: string
   return (
     <div className="flex items-center gap-2">
       <span className="text-[10px] text-zinc-400 w-36 shrink-0 truncate">{label}</span>
-      <div className="flex-1 h-2.5 bg-zinc-800 rounded-full overflow-hidden">
+      <div className="flex-1 h-2.5 bg-muted rounded-full overflow-hidden">
         <div
           className="h-full rounded-full transition-all duration-500"
           style={{ width: `${pct}%`, backgroundColor: color }}
@@ -156,11 +156,11 @@ export default function CommonsLibraryPanel() {
       <div className="animate-pulse space-y-4">
         <div className="flex gap-4 justify-center">
           {[...Array(4)].map((_, i) => (
-            <div key={i} className="w-20 h-20 bg-zinc-800 rounded-full" />
+            <div key={i} className="w-20 h-20 bg-muted rounded-full" />
           ))}
         </div>
-        <div className="h-24 bg-zinc-900 rounded-xl" />
-        <div className="h-24 bg-zinc-900 rounded-xl" />
+        <div className="h-24 bg-muted rounded-xl" />
+        <div className="h-24 bg-muted rounded-xl" />
       </div>
     );
   }
@@ -182,7 +182,7 @@ export default function CommonsLibraryPanel() {
   );
   if (!hasDemographicProfile) {
     return (
-      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6 text-center">
+      <div className="bg-muted/50 border border-border rounded-xl p-6 text-center">
         <p className="text-zinc-400 text-sm font-medium mb-1">
           Demographic profile not yet sourced
         </p>
@@ -251,20 +251,20 @@ export default function CommonsLibraryPanel() {
     <div className="space-y-5">
       {/* ── Hero Stats Row ── */}
       <div className="grid grid-cols-4 gap-3">
-        <div className="bg-zinc-900 rounded-xl p-3">
+        <div className="bg-muted rounded-xl p-3">
           <HeroStat value={population} label="Population" color="text-blue-400" />
         </div>
-        <div className="bg-zinc-900 rounded-xl p-3">
+        <div className="bg-muted rounded-xl p-3">
           <HeroStat value={electorate} label="Electorate" color="text-emerald-400" />
         </div>
-        <div className="bg-zinc-900 rounded-xl p-3">
+        <div className="bg-muted rounded-xl p-3">
           <div className="text-center">
             <div className="text-2xl font-black tracking-tight text-amber-400">{medianAge}</div>
             <div className="text-[10px] text-zinc-500 mt-0.5">Median Age</div>
             <Delta local={medianAge} national={medianAgeEng} />
           </div>
         </div>
-        <div className="bg-zinc-900 rounded-xl p-3">
+        <div className="bg-muted rounded-xl p-3">
           <div className="text-center">
             <div className="text-2xl font-black tracking-tight text-purple-400">{avgPrice}</div>
             <div className="text-[10px] text-zinc-500 mt-0.5">Avg House Price</div>
@@ -274,7 +274,7 @@ export default function CommonsLibraryPanel() {
       </div>
 
       {/* ── Donut Charts Row: Key Percentages ── */}
-      <div className="bg-zinc-900 rounded-xl p-4">
+      <div className="bg-muted rounded-xl p-4">
         <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-3 font-medium">
           Key Indicators
         </div>
@@ -288,22 +288,22 @@ export default function CommonsLibraryPanel() {
       </div>
 
       {/* ── Economy ── */}
-      <div className="bg-zinc-900 rounded-xl p-4">
+      <div className="bg-muted rounded-xl p-4">
         <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-3 font-medium">
           Jobs & Economy
         </div>
         <div className="grid grid-cols-3 gap-3 mb-3">
-          <div className="bg-zinc-800/50 rounded-lg p-2 text-center">
+          <div className="bg-muted/50 rounded-lg p-2 text-center">
             <div className="text-lg font-bold text-emerald-400">{empRate}%</div>
             <div className="text-[9px] text-zinc-500">Employment</div>
             <Delta local={`${empRate}%`} national={empRateEng} />
           </div>
-          <div className="bg-zinc-800/50 rounded-lg p-2 text-center">
+          <div className="bg-muted/50 rounded-lg p-2 text-center">
             <div className="text-lg font-bold text-red-400">{unempRate}%</div>
             <div className="text-[9px] text-zinc-500">Unemployment</div>
             <Delta local={`${unempRate}%`} national={unempRateEng} invert />
           </div>
-          <div className="bg-zinc-800/50 rounded-lg p-2 text-center">
+          <div className="bg-muted/50 rounded-lg p-2 text-center">
             <div className="text-lg font-bold text-zinc-200">{medianPay}</div>
             <div className="text-[9px] text-zinc-500">Median Weekly Pay</div>
             <Delta local={medianPay} national={medianPayEng} />
@@ -313,7 +313,7 @@ export default function CommonsLibraryPanel() {
       </div>
 
       {/* ── Housing ── */}
-      <div className="bg-zinc-900 rounded-xl p-4">
+      <div className="bg-muted rounded-xl p-4">
         <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-3 font-medium">
           Housing Tenure
         </div>
@@ -328,17 +328,17 @@ export default function CommonsLibraryPanel() {
       </div>
 
       {/* ── Health ── */}
-      <div className="bg-zinc-900 rounded-xl p-4">
+      <div className="bg-muted rounded-xl p-4">
         <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-3 font-medium">
           Health & Wellbeing
         </div>
         <div className="grid grid-cols-2 gap-3 mb-3">
-          <div className="bg-zinc-800/50 rounded-lg p-2 text-center">
+          <div className="bg-muted/50 rounded-lg p-2 text-center">
             <div className="text-base font-bold text-blue-400">{lifeExpM}</div>
             <div className="text-[9px] text-zinc-500">Life Exp. (Male)</div>
             <Delta local={lifeExpM} national={lifeExpMEng} />
           </div>
-          <div className="bg-zinc-800/50 rounded-lg p-2 text-center">
+          <div className="bg-muted/50 rounded-lg p-2 text-center">
             <div className="text-base font-bold text-pink-400">{lifeExpF}</div>
             <div className="text-[9px] text-zinc-500">Life Exp. (Female)</div>
             <Delta local={lifeExpF} national={lifeExpFEng} />
@@ -351,7 +351,7 @@ export default function CommonsLibraryPanel() {
       </div>
 
       {/* ── Education ── */}
-      <div className="bg-zinc-900 rounded-xl p-4">
+      <div className="bg-muted rounded-xl p-4">
         <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-3 font-medium">
           Education
         </div>
@@ -366,21 +366,21 @@ export default function CommonsLibraryPanel() {
       </div>
 
       {/* ── Deprivation ── */}
-      <div className="bg-zinc-900 rounded-xl p-4">
+      <div className="bg-muted rounded-xl p-4">
         <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-3 font-medium">
           Deprivation
         </div>
         <div className="grid grid-cols-3 gap-3">
-          <div className="bg-zinc-800/50 rounded-lg p-2 text-center">
+          <div className="bg-muted/50 rounded-lg p-2 text-center">
             <div className="text-base font-bold text-orange-400">{imdRank}</div>
             <div className="text-[9px] text-zinc-500">IMD Rank (of 650)</div>
           </div>
-          <div className="bg-zinc-800/50 rounded-lg p-2 text-center">
+          <div className="bg-muted/50 rounded-lg p-2 text-center">
             <div className="text-base font-bold text-orange-400">{fuelPov}</div>
             <div className="text-[9px] text-zinc-500">Fuel Poverty</div>
             <Delta local={fuelPov} national={fuelPovEng} invert />
           </div>
-          <div className="bg-zinc-800/50 rounded-lg p-2 text-center">
+          <div className="bg-muted/50 rounded-lg p-2 text-center">
             <div className="text-base font-bold text-orange-400">{childPov}</div>
             <div className="text-[9px] text-zinc-500">Child Poverty</div>
             <Delta local={childPov} national={childPovEng} invert />
@@ -389,7 +389,7 @@ export default function CommonsLibraryPanel() {
       </div>
 
       {/* ── Transport ── */}
-      <div className="bg-zinc-900 rounded-xl p-4">
+      <div className="bg-muted rounded-xl p-4">
         <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-3 font-medium">
           Transport & Digital
         </div>
@@ -401,7 +401,7 @@ export default function CommonsLibraryPanel() {
       </div>
 
       {/* ── Demographics ── */}
-      <div className="bg-zinc-900 rounded-xl p-4">
+      <div className="bg-muted rounded-xl p-4">
         <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-3 font-medium">
           Demographics
         </div>

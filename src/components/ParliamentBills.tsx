@@ -38,7 +38,7 @@ const STAGES = [
   { key: "Report", label: "Report", color: "border-purple-500/50 bg-purple-500/5" },
   { key: "3rd reading", label: "3rd Reading", color: "border-emerald-500/50 bg-emerald-500/5" },
   { key: "Royal Assent", label: "Royal Assent", color: "border-green-500/50 bg-green-500/5" },
-  { key: "other", label: "Other", color: "border-zinc-600/50 bg-zinc-800/50" },
+  { key: "other", label: "Other", color: "border-zinc-600/50 bg-muted/50" },
 ];
 
 function classifyStage(stage: string): string {
@@ -104,8 +104,8 @@ export default function ParliamentBills() {
       <div className="p-4 space-y-3">
         {[...Array(5)].map((_, i) => (
           <div key={i} className="animate-pulse space-y-2">
-            <div className="h-3 bg-zinc-800 rounded w-4/5" />
-            <div className="h-2.5 bg-zinc-800/50 rounded w-2/5" />
+            <div className="h-3 bg-muted rounded w-4/5" />
+            <div className="h-2.5 bg-muted/50 rounded w-2/5" />
           </div>
         ))}
       </div>
@@ -124,7 +124,7 @@ export default function ParliamentBills() {
   return (
     <div>
       {/* Tabs */}
-      <div className="flex border-b border-zinc-800">
+      <div className="flex border-b border-border">
         <button
           onClick={() => handleTabChange("votes")}
           className={`flex-1 px-3 py-1.5 text-xs font-medium transition-colors ${
@@ -153,7 +153,7 @@ export default function ParliamentBills() {
               const won = vote.votedAye ? vote.ayes > vote.noes : vote.noes > vote.ayes;
               return (
                 <a key={i} href={vote.url} target="_blank" rel="noopener noreferrer"
-                  className="block px-3 py-2 hover:bg-zinc-800/20 transition-colors group">
+                  className="block px-3 py-2 hover:bg-muted/20 transition-colors group">
                   <div className="flex items-start gap-2">
                     <div className={`mt-0.5 p-1 rounded ${vote.votedAye ? "bg-emerald-400/10" : "bg-red-400/10"}`}>
                       {vote.votedAye ? <ThumbsUp className="h-3 w-3 text-emerald-400" /> : <ThumbsDown className="h-3 w-3 text-red-400" />}
@@ -185,13 +185,13 @@ export default function ParliamentBills() {
       {/* Bills board view */}
       {tab === "bills" && (
         <div>
-          <form onSubmit={handleSearch} className="px-3 py-2 border-b border-zinc-800/50">
+          <form onSubmit={handleSearch} className="px-3 py-2 border-b border-border/50">
             <div className="flex gap-1.5">
               <div className="relative flex-1">
                 <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-zinc-600" />
                 <input type="text" placeholder="Search bills..." value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="w-full bg-zinc-800/50 border border-zinc-700 rounded-md pl-7 pr-2 py-1 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/50"
+                  className="w-full bg-muted/50 border border-border rounded-md pl-7 pr-2 py-1 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/50"
                 />
               </div>
               <button type="submit" disabled={searching}
@@ -218,7 +218,7 @@ export default function ParliamentBills() {
                   <div className="space-y-1 ml-4">
                     {stageBills.slice(0, 4).map((bill) => (
                       <a key={bill.id} href={bill.url} target="_blank" rel="noopener noreferrer"
-                        className={`block px-2 py-1.5 rounded border text-[11px] hover:bg-zinc-800/30 transition-colors ${stage.color}`}>
+                        className={`block px-2 py-1.5 rounded border text-[11px] hover:bg-muted/30 transition-colors ${stage.color}`}>
                         <div className="flex items-center gap-1.5">
                           <span className={`text-[9px] font-bold px-1 rounded ${
                             bill.house === "Commons" ? "text-green-400 bg-green-400/10" : "text-red-400 bg-red-400/10"
@@ -246,7 +246,7 @@ export default function ParliamentBills() {
         </div>
       )}
 
-      <div className="px-3 py-2 border-t border-zinc-800/50 text-center">
+      <div className="px-3 py-2 border-t border-border/50 text-center">
         <span className="text-[10px] text-zinc-600">
           {tab === "votes" ? "James Cleverly voting record" : "Bill stages pipeline"} · Parliament API
         </span>

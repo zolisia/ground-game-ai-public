@@ -41,7 +41,7 @@ export default function WardTable() {
     <div className="overflow-x-auto">
       <table className="w-full text-xs">
         <thead>
-          <tr className="border-b border-zinc-800 text-zinc-500">
+          <tr className="border-b border-border text-zinc-500">
             <th
               className="text-left py-2 px-3 font-medium cursor-pointer hover:text-zinc-300"
               onClick={() => toggleSort("name")}
@@ -78,7 +78,7 @@ export default function WardTable() {
           {sorted.map((ward) => (
             <tr
               key={ward.name}
-              className="border-b border-zinc-800/50 hover:bg-zinc-800/30 transition-colors"
+              className="border-b border-border/50 hover:bg-muted/30 transition-colors"
             >
               <td className="py-2 px-3 text-zinc-300 font-medium">{ward.name}</td>
               <td className="py-2 px-3 text-right">

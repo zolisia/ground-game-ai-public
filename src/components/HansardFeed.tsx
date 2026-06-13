@@ -81,8 +81,8 @@ export default function HansardFeed() {
       <div className="p-4 space-y-3">
         {[...Array(5)].map((_, i) => (
           <div key={i} className="animate-pulse space-y-2">
-            <div className="h-3 bg-zinc-800 rounded w-4/5" />
-            <div className="h-2.5 bg-zinc-800/50 rounded w-3/5" />
+            <div className="h-3 bg-muted rounded w-4/5" />
+            <div className="h-2.5 bg-muted/50 rounded w-3/5" />
           </div>
         ))}
       </div>
@@ -92,7 +92,7 @@ export default function HansardFeed() {
   return (
     <div>
       {/* Tabs */}
-      <div className="flex border-b border-zinc-800">
+      <div className="flex border-b border-border">
         <button
           onClick={() => handleTabChange("speeches")}
           className={`flex-1 px-3 py-1.5 text-xs font-medium transition-colors ${
@@ -131,7 +131,7 @@ export default function HansardFeed() {
                 href={speech.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="block px-3 py-2.5 hover:bg-zinc-800/20 transition-colors group"
+                className="block px-3 py-2.5 hover:bg-muted/20 transition-colors group"
               >
                 <div className="flex items-start gap-2">
                   <div className={`mt-0.5 p-1 rounded ${speech.type === "division" ? "bg-blue-400/10" : "bg-amber-400/10"}`}>
@@ -190,7 +190,7 @@ export default function HansardFeed() {
                 href={q.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="block px-3 py-2.5 hover:bg-zinc-800/20 transition-colors group"
+                className="block px-3 py-2.5 hover:bg-muted/20 transition-colors group"
               >
                 <div className="flex items-start gap-2">
                   <div className="mt-0.5 p-1 rounded bg-purple-400/10">
@@ -238,7 +238,7 @@ export default function HansardFeed() {
       )}
 
       {twfyUrl && (
-        <div className="px-3 py-2 border-t border-zinc-800/50 text-center">
+        <div className="px-3 py-2 border-t border-border/50 text-center">
           <a
             href={twfyUrl}
             target="_blank"

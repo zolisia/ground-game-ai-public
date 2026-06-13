@@ -41,13 +41,13 @@ export default function AIBrief() {
     return (
       <div className="p-4 space-y-3">
         <div className="animate-pulse space-y-3">
-          <div className="h-4 bg-zinc-800 rounded w-3/4" />
-          <div className="h-3 bg-zinc-800/60 rounded w-full" />
-          <div className="h-3 bg-zinc-800/60 rounded w-5/6" />
-          <div className="h-3 bg-zinc-800/40 rounded w-4/5" />
-          <div className="h-4 bg-zinc-800 rounded w-2/3 mt-4" />
-          <div className="h-3 bg-zinc-800/60 rounded w-full" />
-          <div className="h-3 bg-zinc-800/60 rounded w-3/4" />
+          <div className="h-4 bg-muted rounded w-3/4" />
+          <div className="h-3 bg-muted/60 rounded w-full" />
+          <div className="h-3 bg-muted/60 rounded w-5/6" />
+          <div className="h-3 bg-muted/40 rounded w-4/5" />
+          <div className="h-4 bg-muted rounded w-2/3 mt-4" />
+          <div className="h-3 bg-muted/60 rounded w-full" />
+          <div className="h-3 bg-muted/60 rounded w-3/4" />
         </div>
         <div className="text-center text-[10px] text-zinc-600 mt-4">
           Generating AI intelligence brief...
@@ -59,7 +59,7 @@ export default function AIBrief() {
   return (
     <div>
       {/* Header bar with timestamp and refresh */}
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-zinc-800/50 bg-zinc-900/30">
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/50 bg-muted/30">
         {generated && (
           <span className="text-[10px] text-zinc-600">
             Generated:{" "}
@@ -74,7 +74,7 @@ export default function AIBrief() {
         <button
           onClick={handleRefresh}
           disabled={refreshing}
-          className="p-1 rounded hover:bg-zinc-800 transition-colors disabled:opacity-50"
+          className="p-1 rounded hover:bg-muted transition-colors disabled:opacity-50"
           title="Regenerate brief"
         >
           <RefreshCw
@@ -125,7 +125,7 @@ export default function AIBrief() {
               return (
                 <hr
                   key={i}
-                  className="border-zinc-800 my-2"
+                  className="border-border my-2"
                 />
               );
             }
@@ -166,7 +166,7 @@ export default function AIBrief() {
         </div>
       </div>
 
-      <div className="px-3 py-2 border-t border-zinc-800/50 text-center">
+      <div className="px-3 py-2 border-t border-border/50 text-center">
         <span className="text-[10px] text-zinc-600">
           Powered by Claude Sonnet · Anthropic API
         </span>
@@ -180,5 +180,5 @@ function formatInline(text: string): string {
   return text
     .replace(/\*\*([^*]+)\*\*/g, '<strong class="text-zinc-200">$1</strong>')
     .replace(/\*([^*]+)\*/g, '<em>$1</em>')
-    .replace(/`([^`]+)`/g, '<code class="text-emerald-400 bg-zinc-800/50 px-1 rounded text-[10px]">$1</code>');
+    .replace(/`([^`]+)`/g, '<code class="text-emerald-400 bg-muted/50 px-1 rounded text-[10px]">$1</code>');
 }

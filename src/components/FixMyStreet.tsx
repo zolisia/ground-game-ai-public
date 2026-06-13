@@ -58,8 +58,8 @@ export default function FixMyStreet() {
       <div className="p-4 space-y-3">
         {[...Array(4)].map((_, i) => (
           <div key={i} className="animate-pulse space-y-2">
-            <div className="h-3 bg-zinc-800 rounded w-3/4" />
-            <div className="h-2.5 bg-zinc-800/50 rounded w-1/2" />
+            <div className="h-3 bg-muted rounded w-3/4" />
+            <div className="h-2.5 bg-muted/50 rounded w-1/2" />
           </div>
         ))}
       </div>
@@ -68,7 +68,7 @@ export default function FixMyStreet() {
 
   return (
     <div>
-      <div className="px-4 py-2 border-b border-zinc-800/50 flex gap-1 overflow-x-auto">
+      <div className="px-4 py-2 border-b border-border/50 flex gap-1 overflow-x-auto">
         {categories.slice(0, 6).map((cat) => (
           <button
             key={cat}
@@ -90,14 +90,14 @@ export default function FixMyStreet() {
             href={issue.url || `https://www.fixmystreet.com/report/${issue.id}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="block px-4 py-2.5 hover:bg-zinc-800/20 transition-colors"
+            className="block px-4 py-2.5 hover:bg-muted/20 transition-colors"
           >
             <div className="flex items-start gap-2">
               {statusIcon(issue.state)}
               <div className="flex-1 min-w-0">
                 <p className="text-sm text-zinc-300 leading-snug">{issue.title}</p>
                 <div className="flex items-center gap-2 mt-1 text-[11px] text-zinc-600">
-                  <span className="bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-500">
+                  <span className="bg-muted px-1.5 py-0.5 rounded text-zinc-500">
                     {issue.category}
                   </span>
                   <span>{formatDate(issue.created)}</span>
@@ -118,7 +118,7 @@ export default function FixMyStreet() {
           </a>
         ))}
       </div>
-      <div className="px-4 py-2 border-t border-zinc-800/50 text-center">
+      <div className="px-4 py-2 border-t border-border/50 text-center">
         <span className="text-xs text-zinc-600">
           {filtered.length} issues &middot; Data from FixMyStreet
         </span>

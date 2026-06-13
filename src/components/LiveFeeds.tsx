@@ -88,7 +88,7 @@ export default function LiveFeeds() {
   return (
     <div>
       {/* Channel selector strip */}
-      <div className="flex items-center border-b border-zinc-800/50">
+      <div className="flex items-center border-b border-border/50">
         {CHANNELS.map((ch, i) => (
           <button
             key={ch.name}
@@ -118,7 +118,7 @@ export default function LiveFeeds() {
             />
           </div>
         ) : (
-          <div className="flex flex-col items-center justify-center py-10 bg-zinc-950/80">
+          <div className="flex flex-col items-center justify-center py-10 bg-background/80">
             <div className={`p-3 rounded-full ${channel.color} mb-3`}>
               <Tv className={`h-6 w-6 ${channel.textColor}`} />
             </div>
@@ -141,7 +141,7 @@ export default function LiveFeeds() {
       </div>
 
       {/* Status bar */}
-      <div className="px-3 py-1.5 flex items-center justify-between border-t border-zinc-800/50">
+      <div className="px-3 py-1.5 flex items-center justify-between border-t border-border/50">
         <div className="flex items-center gap-1.5">
           <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
           <span className="text-[10px] text-red-400 font-semibold">LIVE</span>

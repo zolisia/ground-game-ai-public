@@ -56,7 +56,7 @@ export default function Demographics() {
       <select
         value={selectedWard}
         onChange={(e) => setSelectedWard(e.target.value)}
-        className="w-full bg-zinc-800 border border-zinc-700 text-zinc-200 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+        className="w-full bg-muted border border-border text-zinc-200 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-emerald-500"
       >
         <option value="all">All {constituencyName} (Constituency Average)</option>
         {wardNames.map((wn) => (

@@ -326,7 +326,7 @@ function ComparisonChart({ series, dates }: { series: ComparisonSeries[]; dates:
 
 function UnavailableSection({ height = "py-4" }: { height?: string }) {
   return (
-    <div className={`bg-zinc-900/40 rounded-lg border border-zinc-800/50 px-3 ${height}`}>
+    <div className={`bg-muted/40 rounded-lg border border-border/50 px-3 ${height}`}>
       <p className="text-xs text-zinc-500 text-center">Currently unavailable</p>
     </div>
   );
@@ -402,23 +402,23 @@ export default function TrendsPanel() {
     return (
       <div className="p-4 space-y-4">
         <div className="flex items-center gap-2 mb-3">
-          <div className="h-4 w-4 bg-zinc-800 rounded animate-pulse" />
-          <div className="h-3 w-32 bg-zinc-800 rounded animate-pulse" />
+          <div className="h-4 w-4 bg-muted rounded animate-pulse" />
+          <div className="h-3 w-32 bg-muted rounded animate-pulse" />
         </div>
-        <div className="h-28 bg-zinc-900/50 rounded-lg animate-pulse" />
+        <div className="h-28 bg-muted/50 rounded-lg animate-pulse" />
         <div className="flex gap-4">
           {[1, 2].map((i) => (
             <div key={i} className="flex items-center gap-1">
-              <div className="h-2.5 w-2.5 rounded-full bg-zinc-800 animate-pulse" />
-              <div className="h-2.5 w-16 bg-zinc-800 rounded animate-pulse" />
+              <div className="h-2.5 w-2.5 rounded-full bg-muted animate-pulse" />
+              <div className="h-2.5 w-16 bg-muted rounded animate-pulse" />
             </div>
           ))}
         </div>
         <div className="space-y-3 mt-2">
           {[1, 2, 3].map((i) => (
             <div key={i} className="space-y-1">
-              <div className="h-2.5 w-24 bg-zinc-800 rounded animate-pulse" />
-              <div className="h-2 bg-zinc-800/50 rounded-full animate-pulse" />
+              <div className="h-2.5 w-24 bg-muted rounded animate-pulse" />
+              <div className="h-2 bg-muted/50 rounded-full animate-pulse" />
             </div>
           ))}
         </div>
@@ -430,7 +430,7 @@ export default function TrendsPanel() {
   if (error && !data) {
     return (
       <div className="p-6 text-center">
-        <div className="inline-flex items-center justify-center h-10 w-10 rounded-full bg-zinc-800/60 mb-3">
+        <div className="inline-flex items-center justify-center h-10 w-10 rounded-full bg-muted/60 mb-3">
           <Search className="h-5 w-5 text-zinc-500" />
         </div>
         <p className="text-sm font-medium text-zinc-400">
@@ -458,7 +458,7 @@ export default function TrendsPanel() {
 
         {interestOk ? (
           <>
-            <div className="bg-zinc-900/40 rounded-lg p-3 border border-zinc-800/50">
+            <div className="bg-muted/40 rounded-lg p-3 border border-border/50">
               <ComparisonChart series={comparisonSeries} dates={chartDates} />
             </div>
             <p className="text-[10px] text-zinc-600 mt-1.5 px-1">
@@ -480,7 +480,7 @@ export default function TrendsPanel() {
         </div>
 
         {regionalOk && data?.regionalVsNational ? (
-          <div className="bg-zinc-900/40 rounded-lg border border-zinc-800/50 divide-y divide-zinc-800/40">
+          <div className="bg-muted/40 rounded-lg border border-border/50 divide-y divide-zinc-800/40">
             {data.regionalVsNational.map((r) => {
               const regionVal = r.regionValue ?? r.eastOfEnglandValue ?? null;
               return (
@@ -515,11 +515,11 @@ export default function TrendsPanel() {
         </div>
 
         {trendingOk && data?.trendingSearches ? (
-          <div className="bg-zinc-900/30 rounded-lg mx-2 border border-zinc-800/40 divide-y divide-zinc-800/40">
+          <div className="bg-muted/30 rounded-lg mx-2 border border-border/40 divide-y divide-zinc-800/40">
             {data.trendingSearches.slice(0, 6).map((t) => (
               <div
                 key={t.title}
-                className="flex justify-between items-center px-3 py-2 hover:bg-zinc-800/20 transition-colors"
+                className="flex justify-between items-center px-3 py-2 hover:bg-muted/20 transition-colors"
               >
                 <span className="text-[12px] text-zinc-300">{t.title}</span>
                 {t.traffic && (
