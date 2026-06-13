@@ -52,6 +52,7 @@ const STANDARD_ROUTES = [
   "/api/planning",
   "/api/fixmystreet",
   "/api/ai-brief",
+  "/api/electoral-calculus",
 ];
 
 // Routes refreshed every 30 minutes (live data only)
