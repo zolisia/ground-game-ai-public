@@ -112,11 +112,8 @@ async function fetchFromApify(candidates: BraintreeCandidate[]): Promise<Opponen
   const token = process.env.APIFY_API_TOKEN;
   if (!token) return [];
 
-  const results: Opponent[] = [];
-
-  for (const candidate of candidates) {
-    try {
-      // Search for each party's mentions separately
+  const settled = await Promise.allSettled(
+    candidates.map(async (candidate) => {
       const searchQuery = candidate.searchTerms[0];
       const res = await fetch(
         `${APIFY_BASE}/${APIFY_ACTOR}/run-sync-get-dataset-items?token=${token}`,
@@ -138,7 +135,7 @@ async function fetchFromApify(candidates: BraintreeCandidate[]): Promise<Opponen
         const tweets: ApifyTweet[] = await res.json();
         const validTweets = tweets.filter((t) => {
           const text = t.full_text || t.text || "";
-          return text.length > 10; // filter out empty results
+          return text.length > 10;
         });
 
         recentPosts = validTweets.slice(0, 3).map((t) => ({
@@ -152,7 +149,7 @@ async function fetchFromApify(candidates: BraintreeCandidate[]): Promise<Opponen
         activityLevel = validTweets.length > 4 ? "high" : validTweets.length > 1 ? "medium" : "low";
       }
 
-      results.push({
+      return {
         party: candidate.party,
         candidate: candidate.candidate,
         handle: candidate.handle || candidate.councilHandle || "",
@@ -160,22 +157,23 @@ async function fetchFromApify(candidates: BraintreeCandidate[]): Promise<Opponen
         recentPosts,
         activityLevel,
         color: candidate.color,
-      });
-    } catch {
-      // If Apify fails for this candidate, add them with static data
-      results.push({
-        party: candidate.party,
-        candidate: candidate.candidate,
-        handle: candidate.handle || candidate.councilHandle || "",
-        followers: candidate.votePct ? `${candidate.votePct} (2024)` : "N/A",
-        recentPosts: [],
-        activityLevel: "low",
-        color: candidate.color,
-      });
-    }
-  }
+      };
+    })
+  );
 
-  return results;
+  return settled.map((result, i) => {
+    if (result.status === "fulfilled") return result.value;
+    const candidate = candidates[i];
+    return {
+      party: candidate.party,
+      candidate: candidate.candidate,
+      handle: candidate.handle || candidate.councilHandle || "",
+      followers: candidate.votePct ? `${candidate.votePct} (2024)` : "N/A",
+      recentPosts: [],
+      activityLevel: "low" as const,
+      color: candidate.color,
+    };
+  });
 }
 
 function getCandidateInfo(candidates: BraintreeCandidate[]): Opponent[] {
