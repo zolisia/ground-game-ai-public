@@ -413,9 +413,17 @@ export default function PollingDashboard() {
           <SeatProjectionSection averages={data.averages} ecNational={ecNational} />
         )}
 
-        {/* ══════ BRAINTREE LOCAL ══════ */}
+        {/* ══════ LOCAL POLLING ══════ */}
         {section === "local" && (
-          <BraintreeLocalSection averages={data.averages} ecConstituency={ecConstituency} constituencyName={constituencyName} />
+          slug === "braintree" ? (
+            <BraintreeLocalSection averages={data.averages} ecConstituency={ecConstituency} constituencyName={constituencyName} />
+          ) : (
+            <div className="p-4 text-center">
+              <div className="text-xs text-zinc-500">
+                Local polling projection not yet available for {constituencyName}.
+              </div>
+            </div>
+          )
         )}
 
         {/* ══════ LEADER RATINGS ══════ */}
