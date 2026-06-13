@@ -63,24 +63,21 @@ export async function GET(request: Request) {
     );
   }
 
-  const allItems: FeedItem[] = [];
-
-  for (const feed of feeds) {
-    try {
+  const feedResults = await Promise.allSettled(
+    feeds.map(async (feed) => {
       const res = await fetch(feed.url, {
         next: { revalidate: 900 }, // Cache for 15 minutes
         headers: { "User-Agent": "GroundGameAI/1.0" },
       });
-
-      if (!res.ok) continue;
-
+      if (!res.ok) return [];
       const text = await res.text();
-      const items = parseRSS(text, feed.name);
-      allItems.push(...items);
-    } catch {
-      // Skip failed feeds
-    }
-  }
+      return parseRSS(text, feed.name);
+    })
+  );
+
+  const allItems: FeedItem[] = feedResults.flatMap((r) =>
+    r.status === "fulfilled" ? r.value : []
+  );
 
   // Sort by date, newest first
   allItems.sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime());
