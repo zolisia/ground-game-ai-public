@@ -1,22 +1,40 @@
 "use client";
 
 import { useState } from "react";
-import { wardData } from "@/data/braintree";
+import { WARD_DEPRIVATION } from "@/data/ward-deprivation";
+import { useConstituency } from "@/hooks/useConstituency";
 import { ChevronDown, ChevronUp } from "lucide-react";
 
-type SortField = "name" | "population" | "conVote" | "refVote" | "labVote" | "deprivation";
+type SortField = "name" | "imdScore";
+
+const DEPRIVATION_COLORS: Record<string, string> = {
+  Low: "bg-emerald-500/10 text-emerald-400",
+  "Low-Medium": "bg-emerald-500/10 text-emerald-400",
+  Medium: "bg-yellow-500/10 text-yellow-400",
+  "Medium-High": "bg-orange-500/10 text-orange-400",
+  High: "bg-red-500/10 text-red-400",
+};
 
 export default function WardTable() {
-  const [sortField, setSortField] = useState<SortField>("conVote");
+  const { slug } = useConstituency();
+  const wards = WARD_DEPRIVATION[slug] ?? null;
+
+  const [sortField, setSortField] = useState<SortField>("imdScore");
   const [sortAsc, setSortAsc] = useState(false);
 
-  const sorted = [...wardData].sort((a, b) => {
-    const av = a[sortField];
-    const bv = b[sortField];
-    if (typeof av === "string" && typeof bv === "string") {
-      return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
+  if (!wards) {
+    return (
+      <div className="p-4">
+        <div className="text-xs text-zinc-500">Ward data not available for this constituency.</div>
+      </div>
+    );
+  }
+
+  const sorted = [...wards].sort((a, b) => {
+    if (sortField === "name") {
+      return sortAsc ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name);
     }
-    return sortAsc ? (av as number) - (bv as number) : (bv as number) - (av as number);
+    return sortAsc ? a.imdScore - b.imdScore : b.imdScore - a.imdScore;
   });
 
   const toggleSort = (field: SortField) => {
@@ -50,57 +68,30 @@ export default function WardTable() {
             </th>
             <th
               className="text-right py-2 px-3 font-medium cursor-pointer hover:text-zinc-300"
-              onClick={() => toggleSort("conVote")}
+              onClick={() => toggleSort("imdScore")}
             >
-              CON <SortIcon field="conVote" />
+              IMD Score <SortIcon field="imdScore" />
             </th>
-            <th
-              className="text-right py-2 px-3 font-medium cursor-pointer hover:text-zinc-300"
-              onClick={() => toggleSort("refVote")}
-            >
-              REF <SortIcon field="refVote" />
-            </th>
-            <th
-              className="text-right py-2 px-3 font-medium cursor-pointer hover:text-zinc-300"
-              onClick={() => toggleSort("labVote")}
-            >
-              LAB <SortIcon field="labVote" />
-            </th>
-            <th
-              className="text-right py-2 px-3 font-medium cursor-pointer hover:text-zinc-300 hidden sm:table-cell"
-              onClick={() => toggleSort("deprivation")}
-            >
-              Deprivation <SortIcon field="deprivation" />
-            </th>
+            <th className="text-right py-2 px-3 font-medium">Deprivation</th>
           </tr>
         </thead>
         <tbody>
           {sorted.map((ward) => (
             <tr
-              key={ward.name}
+              key={ward.code}
               className="border-b border-border/50 hover:bg-muted/30 transition-colors"
             >
               <td className="py-2 px-3 text-zinc-300 font-medium">{ward.name}</td>
-              <td className="py-2 px-3 text-right">
-                <span className="text-blue-400">{ward.conVote}%</span>
+              <td className="py-2 px-3 text-right text-zinc-400 tabular-nums">
+                {ward.imdScore.toFixed(1)}
               </td>
               <td className="py-2 px-3 text-right">
-                <span className="text-cyan-400">{ward.refVote}%</span>
-              </td>
-              <td className="py-2 px-3 text-right">
-                <span className="text-red-400">{ward.labVote}%</span>
-              </td>
-              <td className="py-2 px-3 text-right hidden sm:table-cell">
                 <span
                   className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                    ward.deprivation === "Low"
-                      ? "bg-emerald-500/10 text-emerald-400"
-                      : ward.deprivation === "Medium"
-                      ? "bg-yellow-500/10 text-yellow-400"
-                      : "bg-red-500/10 text-red-400"
+                    DEPRIVATION_COLORS[ward.class] ?? "bg-zinc-500/10 text-zinc-400"
                   }`}
                 >
-                  {ward.deprivation}
+                  {ward.class}
                 </span>
               </td>
             </tr>
