@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ExternalLink, MessageSquare, HelpCircle, Vote, FileText } from "lucide-react";
 import { useConstituency, withConstituency } from "@/hooks/useConstituency";
+import { getFullData } from "@/data";
 
 type Tab = "speeches" | "questions";
 
@@ -29,6 +30,8 @@ interface Question {
 
 export default function HansardFeed() {
   const { slug } = useConstituency();
+  const memberId = getFullData(slug)?.constituency.memberId ?? null;
+  const twfyUrl = memberId ? `https://www.theyworkforyou.com/mp/${memberId}` : null;
   const [tab, setTab] = useState<Tab>("speeches");
   const [speeches, setSpeeches] = useState<Speech[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -234,16 +237,18 @@ export default function HansardFeed() {
         </div>
       )}
 
-      <div className="px-3 py-2 border-t border-zinc-800/50 text-center">
-        <a
-          href="https://www.theyworkforyou.com/mp/11816/james_cleverly/braintree"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-[10px] text-zinc-600 hover:text-emerald-400 transition-colors"
-        >
-          View full record on TheyWorkForYou ↗
-        </a>
-      </div>
+      {twfyUrl && (
+        <div className="px-3 py-2 border-t border-zinc-800/50 text-center">
+          <a
+            href={twfyUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[10px] text-zinc-600 hover:text-emerald-400 transition-colors"
+          >
+            View full record on TheyWorkForYou ↗
+          </a>
+        </div>
+      )}
     </div>
   );
 }
