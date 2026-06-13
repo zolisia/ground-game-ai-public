@@ -1,11 +1,11 @@
 "use client";
 
-import { Suspense, useState, useCallback } from "react";
+import { Suspense, useState, useCallback, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Header, { TabId } from "@/components/Header";
 import Panel from "@/components/Panel";
 import dynamic from "next/dynamic";
-import { useConstituency, type ConstituencySlug } from "@/hooks/useConstituency";
+import { useConstituency, withConstituency, type ConstituencySlug } from "@/hooks/useConstituency";
 
 const ConstituencyMap = dynamic(() => import("@/components/ConstituencyMap"), {
   ssr: false,
@@ -76,11 +76,35 @@ export default function DashboardPage() {
   );
 }
 
+function formatCachedAt(ts: number): string {
+  const d = new Date(ts);
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const tsDayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const timeStr = d.toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit", hour12: true });
+  if (tsDayStart === todayStart) {
+    return d.getHours() < 12 ? `Data from this morning, ${timeStr}` : `Data from today, ${timeStr}`;
+  }
+  if (tsDayStart === todayStart - 86400000) {
+    return `Data from yesterday, ${timeStr}`;
+  }
+  return `Data from ${d.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}, ${timeStr}`;
+}
+
 function Dashboard() {
   const [activeTab, setActiveTab] = useState<TabId>("map");
   const { slug: constituencySlug, name: constituencyName } = useConstituency();
   const router = useRouter();
   const pathname = usePathname();
+  const [dataCachedAt, setDataCachedAt] = useState<number | null>(null);
+
+  useEffect(() => {
+    setDataCachedAt(null);
+    fetch(withConstituency("/api/employment", constituencySlug))
+      .then(r => r.json())
+      .then((d: { _cachedAt?: number }) => { if (d._cachedAt) setDataCachedAt(d._cachedAt); })
+      .catch(() => {});
+  }, [constituencySlug]);
 
   const handleConstituencyChange = useCallback(
     (next: ConstituencySlug) => {
@@ -102,6 +126,12 @@ function Dashboard() {
         constituencySlug={constituencySlug}
         onConstituencyChange={handleConstituencyChange}
       />
+
+      {dataCachedAt !== null && (
+        <div className="px-4 py-1 border-b border-[#1a1a1a]">
+          <span className="text-[10px] text-zinc-600">{formatCachedAt(dataCachedAt)}</span>
+        </div>
+      )}
 
       <main className="flex-1 p-2 lg:p-3">
         <div className="max-w-[1800px] mx-auto">
