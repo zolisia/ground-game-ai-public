@@ -253,7 +253,7 @@ export async function GET(request: Request) {
     "Reform UK",
   ];
 
-  const cacheDocRef = adminDb.collection("trends_cache").doc(constituencySlug);
+  const cacheDocRef = adminDb.collection("trends_v2_cache").doc(constituencySlug);
 
   type CacheDoc = { data: Record<string, unknown>; updated_at: string };
   let cached: CacheDoc | null = null;

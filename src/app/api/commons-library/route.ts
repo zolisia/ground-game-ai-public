@@ -7,7 +7,7 @@ export const maxDuration = 30;
 
 // Live data (employment rate, claimant count, MP info): 24h TTL, warmed daily by cron.
 // Demographic profile (Census indicators): 6-month TTL, auto-fetched on first request
-// and stored in demographic_profile/{slug}. Adding a new constituency requires no code
+// and stored in demographic_profile_cache/{slug}. Adding a new constituency requires no code
 // change — the first page load triggers the fetch and caches it.
 const TTL_MS = 24 * 60 * 60 * 1000;
 const DEMOGRAPHIC_TTL_MS = 180 * 24 * 60 * 60 * 1000; // ~6 months
@@ -314,7 +314,7 @@ async function getOrFetchDemographicProfile(
   ladCode: string | null,
   wpca24Code: string | null
 ): Promise<DataSection[]> {
-  const ref = adminDb.collection("demographic_profile").doc(slug);
+  const ref = adminDb.collection("demographic_profile_cache").doc(slug);
 
   try {
     const snap = await ref.get();

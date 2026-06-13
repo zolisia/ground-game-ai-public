@@ -159,7 +159,7 @@ export async function GET(request: Request) {
     );
   }
 
-  const cacheDocRef = adminDb.collection("flood_cache").doc(constituencySlug);
+  const cacheDocRef = adminDb.collection("floods_cache").doc(constituencySlug);
 
   type CacheDoc = { data: { warnings: unknown[]; stations: unknown[]; activeWarnings: number }; updated_at: string };
   let cached: CacheDoc | null = null;
