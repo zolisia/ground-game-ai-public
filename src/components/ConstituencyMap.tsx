@@ -66,21 +66,6 @@ async function loadConstituencyBoundary(onsCode: string): Promise<BoundaryCollec
   }
 }
 
-// Per-constituency ward GeoJSON. Each file is a FeatureCollection of the
-// constituency's wards (WD24CD/WD24NM properties, 4326 geometry, sourced from
-// ONS WD_MAY_2024_UK_BGC). For slugs not listed here the ward layers don't
-// render — boundary still does, via constituencies-all.geojson.
-const WARDS_GEOJSON_PATHS: Record<string, string> = {
-  braintree: "/geojson/braintree-wards.geojson",
-  clacton: "/geojson/clacton-wards.geojson",
-  walthamstow: "/geojson/walthamstow-wards.geojson",
-  "sheffield-central": "/geojson/sheffield-central-wards.geojson",
-  "leeds-central-and-headingley": "/geojson/leeds-central-and-headingley-wards.geojson",
-  "south-basildon-and-east-thurrock": "/geojson/south-basildon-and-east-thurrock-wards.geojson",
-  "great-yarmouth": "/geojson/great-yarmouth-wards.geojson",
-  "streatham-and-croydon-north": "/geojson/streatham-and-croydon-north-wards.geojson",
-  "lewisham-east": "/geojson/lewisham-east-wards.geojson",
-};
 
 interface FMSIssue {
   id: string;
@@ -165,14 +150,12 @@ export default function ConstituencyMap() {
       try {
         // Fetch boundary, wards and live EC data in parallel.
         // Boundary works for any constituency — extracted from the cached
-        // 21MB constituencies-all.geojson by ONS code. Ward layers render for
-        // any constituency listed in WARDS_GEOJSON_PATHS; others get boundary
-        // only.
+        // 21MB constituencies-all.geojson by ONS code. Ward boundaries come
+        // from /api/ward-boundaries which filters the all-UK ONS WD24 dataset.
         const onsCode = data?.constituency.onsCode;
-        const wardsPath = WARDS_GEOJSON_PATHS[slug];
         const [constituencyData, wardsRes, ecRes] = await Promise.all([
           onsCode ? loadConstituencyBoundary(onsCode) : Promise.resolve(null),
-          wardsPath ? fetch(wardsPath) : Promise.resolve(null),
+          fetch(`/api/ward-boundaries?constituency=${slug}`).catch(() => null),
           fetch(withConstituency("/api/electoral-calculus?type=seat", slug)).catch(() => null),
         ]);
 
@@ -201,9 +184,6 @@ export default function ConstituencyMap() {
           // Keep fallback wardElectoralCalc
         }
 
-        // Boundary works for any constituency now. Wards still depend on the
-        // Braintree-specific GeoJSON + static per-ward vote data — TODO when
-        // per-constituency ward data is sourced.
         if (constituencyData) {
         // === BOUNDARY SOURCE + LAYERS (universal) ===
         m.addSource("constituency", { type: "geojson", data: constituencyData });
@@ -220,8 +200,8 @@ export default function ConstituencyMap() {
           paint: { "line-color": "#10b981", "line-width": 2.5, "line-dasharray": [3, 2] },
         });
 
-        // === WARD SOURCE + LAYERS (Braintree-only for now) ===
-        if (wardsRes) {
+        // === WARD SOURCE + LAYERS ===
+        if (wardsRes && wardsRes.ok) {
         const wardsData = await wardsRes.json();
 
         // Enrich ward features
@@ -764,17 +744,10 @@ export default function ConstituencyMap() {
         const source = m.getSource("wards") as maplibregl.GeoJSONSource;
         if (!source) return;
 
-        // Census recolour requires the per-ward GeoJSON. Listed slugs only —
-        // for the rest the census API still returns data but there's nothing
-        // to colour.
-        const wardsPath = WARDS_GEOJSON_PATHS[slug];
-        if (!wardsPath) {
-          return;
-        }
-
         // We need to get the current data and enrich it
-        // Use the wards geojson URL since we can't read from source directly
-        const wardsRes = await fetch(wardsPath);
+        // Use the wards API since we can't read from a MapLibre source directly
+        const wardsRes = await fetch(`/api/ward-boundaries?constituency=${slug}`);
+        if (!wardsRes.ok) return;
         const wardsGeo = await wardsRes.json();
         for (const feature of wardsGeo.features) {
           const code = feature.properties.WD24CD;
