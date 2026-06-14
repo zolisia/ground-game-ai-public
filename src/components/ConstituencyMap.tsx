@@ -90,6 +90,7 @@ interface PlanningApp {
 
 export default function ConstituencyMap() {
   const { slug } = useConstituency();
+  const isEnglishConstituency = getFullData(slug)?.constituency.onsCode.startsWith("E14") ?? false;
   const { resolvedTheme } = useTheme();
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
@@ -1015,9 +1016,7 @@ export default function ConstituencyMap() {
           <div className="mt-1 bg-card/95 backdrop-blur border border-border rounded-lg overflow-hidden">
             {LAYER_DEFS.map((layer) => {
               const hasDeprivationData =
-                layer.id !== "wards-deprivation" ||
-                slug === "braintree" ||
-                !!WARD_DEPRIVATION[slug];
+                layer.id !== "wards-deprivation" || isEnglishConstituency;
               return (
               <div key={layer.id}>
                 <label
