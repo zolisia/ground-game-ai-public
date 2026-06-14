@@ -202,7 +202,7 @@ export default function CommonsLibraryPanel() {
   const dep = data.sections.deprivation?.[0]?.rows || [];
   const transport = data.sections.transport?.[0]?.rows || [];
 
-  const population = getRowVal(pop, "population") || "80,100";
+  const population = getRowVal(pop, "population") ?? "—";
   const electorate = getRowVal(pop, "electorate") || "77,781";
   const medianAge = getRowVal(pop, "median") || "43";
   const medianAgeEng = getRowEngland(pop, "median");
