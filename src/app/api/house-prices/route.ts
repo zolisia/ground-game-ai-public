@@ -50,13 +50,21 @@ interface HousePricesData {
   sourceUrl: string;
 }
 
-async function generateFreshData(ladName: string): Promise<HousePricesData | null> {
+// false = region has no UKHPI data (clean 400); null = network/unexpected error (500)
+async function generateFreshData(
+  ladName: string
+): Promise<HousePricesData | null | false> {
   try {
-    const ukhpiName = encodeURIComponent(ladName);
+    const slug = ladName
+      .toLowerCase()
+      .replace(/\s+/g, "-")
+      .replace(/[^a-z0-9-]/g, "");
     const ppiDistrict = encodeURIComponent(ladName.toUpperCase());
-    const [indexRes, salesRes] = await Promise.allSettled([
+
+    // Step 1: Fetch region URI list and PPI recent sales in parallel
+    const [regionRes, salesRes] = await Promise.allSettled([
       fetch(
-        `https://landregistry.data.gov.uk/data/ukhpi/region.json?name=${ukhpiName}&_pageSize=50`,
+        `https://landregistry.data.gov.uk/data/ukhpi/region/${slug}.json?_pageSize=36`,
         { next: { revalidate: 86400 } }
       ),
       fetch(
@@ -65,59 +73,80 @@ async function generateFreshData(ladName: string): Promise<HousePricesData | nul
       ),
     ]);
 
-    let indexItems: UKHPIItem[] = [];
-    if (indexRes.status === "fulfilled" && indexRes.value.ok) {
-      const indexData = await indexRes.value.json();
-      const rawItems: Record<string, unknown>[] = indexData?.result?.items ?? [];
-      indexItems = rawItems
-        .map((item) => {
-          // Period can be a URI like http://reference.data.gov.uk/id/month/2024-06
-          // or a plain string like "2024-06"
-          let period: string | null = null;
-          const rawPeriod = item["http://purl.org/linked-data/sdmx/2009/dimension#refPeriod"]
-            ?? item.refPeriod ?? item.period ?? null;
-          if (rawPeriod && typeof rawPeriod === "object" && (rawPeriod as Record<string, unknown>)._about) {
-            // Extract date from URI: .../2024-06 -> 2024-06
-            const aboutStr = String((rawPeriod as Record<string, unknown>)._about);
-            period = aboutStr.split("/").pop() ?? aboutStr;
-          } else if (typeof rawPeriod === "string") {
-            period = rawPeriod.includes("/") ? rawPeriod.split("/").pop() ?? rawPeriod : rawPeriod;
-          }
-
-          const averagePrice = Number(
-            item["http://landregistry.data.gov.uk/def/ukhpi/averagePrice"]
-            ?? item.averagePrice ?? 0
-          );
-          const annualChange = item["http://landregistry.data.gov.uk/def/ukhpi/percentageAnnualChange"]
-            ?? item.annualChange ?? item.percentageChange ?? null;
-          const salesVolume = item["http://landregistry.data.gov.uk/def/ukhpi/salesVolume"]
-            ?? item.salesVolume ?? null;
-
-          return {
-            period: period ?? "",
-            averagePrice,
-            annualChange: annualChange != null ? Number(annualChange) : undefined,
-            salesVolume: salesVolume != null ? Number(salesVolume) : undefined,
-          };
-        })
-        .filter((item) => item.period && item.averagePrice > 0);
+    // Step 2: Parse region URI list (newest-first array of month URIs)
+    let monthUris: string[] = [];
+    if (regionRes.status === "fulfilled" && regionRes.value.ok) {
+      const regionData = await regionRes.value.json();
+      monthUris = regionData?.result?.items ?? [];
     }
 
+    // No months means this LAD slug has no UKHPI coverage
+    if (monthUris.length === 0) {
+      return false;
+    }
+
+    // Step 3: Fetch monthly price records in batches to avoid rate limiting
+    // Land Registry throttles ~36 simultaneous requests; batches of 12 with
+    // 150ms gaps give full coverage without significant latency overhead.
+    const BATCH_SIZE = 12;
+    const indexItems: UKHPIItem[] = [];
+
+    for (let i = 0; i < monthUris.length; i += BATCH_SIZE) {
+      if (i > 0) await new Promise((r) => setTimeout(r, 150));
+
+      const batch = monthUris.slice(i, i + BATCH_SIZE);
+      const batchResults = await Promise.allSettled(
+        batch.map((uri) => {
+          const url = uri.replace(/^http:/, "https:") + ".json";
+          return fetch(url, { next: { revalidate: 86400 } }).then((r) => {
+            if (!r.ok) throw new Error(`${r.status}`);
+            return r.json();
+          });
+        })
+      );
+
+      for (const result of batchResults) {
+        if (result.status !== "fulfilled") continue;
+        const topic = result.value?.result?.primaryTopic;
+        if (!topic?.averagePrice) continue;
+
+        // Extract period from _about URI: .../month/2026-03 -> 2026-03
+        const about = (topic._about as string) ?? "";
+        const period = about.split("/month/")[1] ?? "";
+        if (!period) continue;
+
+        indexItems.push({
+          period,
+          averagePrice: Number(topic.averagePrice),
+          annualChange:
+            topic.percentageAnnualChange != null
+              ? Number(topic.percentageAnnualChange)
+              : undefined,
+          salesVolume:
+            topic.salesVolume != null ? Number(topic.salesVolume) : undefined,
+        });
+      }
+    }
+
+    // Sort oldest to newest for chart rendering
+    indexItems.sort((a, b) => a.period.localeCompare(b.period));
+
+    // Step 4: Recent sales from PPI
     let recentSales: Record<string, unknown>[] = [];
     if (salesRes.status === "fulfilled" && salesRes.value.ok) {
       const salesData = await salesRes.value.json();
       const rawItems: TransactionRecord[] = salesData?.result?.items ?? [];
       recentSales = rawItems.map((t) => {
-        // Normalize propertyType — Land Registry returns nested objects
         let typeLabel: string | null = null;
         const pt = t.propertyType as unknown;
         if (typeof pt === "string") {
           typeLabel = pt;
         } else if (pt && typeof pt === "object") {
           const obj = pt as Record<string, unknown>;
-          // Try prefLabel first, then _about URL
           if (Array.isArray(obj.prefLabel) && obj.prefLabel[0]) {
-            typeLabel = String((obj.prefLabel[0] as Record<string, string>)._value ?? "");
+            typeLabel = String(
+              (obj.prefLabel[0] as Record<string, string>)._value ?? ""
+            );
           } else if (obj._about) {
             typeLabel = String(obj._about).split("/").pop() ?? null;
           }
@@ -157,7 +186,7 @@ async function fetchAndUpdateCache(
 ) {
   try {
     const fresh = await generateFreshData(ladName);
-    if (!fresh) return;
+    if (!fresh) return; // handles null (error) and false (not found)
 
     const existing = await cacheDocRef.get();
     const existingData = existing.data()?.data ?? null;
@@ -230,6 +259,16 @@ export async function GET(request: Request) {
   }
 
   const fresh = await generateFreshData(ladName);
+  if (fresh === false) {
+    return Response.json(
+      {
+        error: "House price data not available for this area",
+        message: "No UKHPI data found for this local authority",
+        constituency: constituencySlug,
+      },
+      { status: 400 }
+    );
+  }
   if (!fresh) {
     return NextResponse.json(
       { index: { items: [] }, recentSales: [], error: "Failed to fetch house price data" },
