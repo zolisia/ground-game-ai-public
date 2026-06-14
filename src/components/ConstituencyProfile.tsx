@@ -32,7 +32,10 @@ export default function ConstituencyProfile() {
       label: population != null ? "Population" : "Electorate",
       value: (population ?? electorate).toLocaleString(),
     },
-    { icon: <MapPin className="h-3.5 w-3.5" />, label: "Electorate", value: electorate.toLocaleString() },
+    // Only show dedicated Electorate card when Population is already shown above
+    ...(population != null
+      ? [{ icon: <MapPin className="h-3.5 w-3.5" />, label: "Electorate", value: electorate.toLocaleString() }]
+      : []),
   ];
 
   return (
