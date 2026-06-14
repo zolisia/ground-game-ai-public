@@ -1013,16 +1013,31 @@ export default function ConstituencyMap() {
 
         {layerPanel && (
           <div className="mt-1 bg-card/95 backdrop-blur border border-border rounded-lg overflow-hidden">
-            {LAYER_DEFS.map((layer) => (
+            {LAYER_DEFS.map((layer) => {
+              const hasDeprivationData =
+                layer.id !== "wards-deprivation" ||
+                slug === "braintree" ||
+                !!WARD_DEPRIVATION[slug];
+              return (
               <div key={layer.id}>
                 <label
-                  className="flex items-center gap-2 px-3 py-1.5 hover:bg-muted/50 cursor-pointer transition-colors"
+                  className={`flex items-center gap-2 px-3 py-1.5 transition-colors ${
+                    hasDeprivationData
+                      ? "hover:bg-muted/50 cursor-pointer"
+                      : "cursor-not-allowed opacity-40"
+                  }`}
+                  title={
+                    !hasDeprivationData
+                      ? "Deprivation data not yet sourced for this constituency"
+                      : undefined
+                  }
                 >
                   <input
                     type="checkbox"
                     checked={layers[layer.id] || false}
-                    onChange={() => toggleLayer(layer.id)}
-                    className="w-3 h-3 rounded border-border bg-muted text-emerald-500 focus:ring-0 focus:ring-offset-0 accent-emerald-500"
+                    onChange={() => hasDeprivationData && toggleLayer(layer.id)}
+                    disabled={!hasDeprivationData}
+                    className="w-3 h-3 rounded border-border bg-muted text-emerald-500 focus:ring-0 focus:ring-offset-0 accent-emerald-500 disabled:cursor-not-allowed"
                   />
 
                   <div className="flex-1 min-w-0">
@@ -1053,7 +1068,8 @@ export default function ConstituencyMap() {
                   </div>
                 )}
               </div>
-            ))}
+            );
+            })}
           </div>
         )}
       </div>
