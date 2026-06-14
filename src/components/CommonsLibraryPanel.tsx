@@ -222,9 +222,6 @@ export default function CommonsLibraryPanel() {
   const ownerOccEng = getRowEngland(housing, "owner");
   const socialRent = extractPct(getRowVal(housing, "social") || "13.2%");
   const privateRent = extractPct(getRowVal(housing, "private") || "12.1%");
-  const avgPrice = getRowVal(housing, "average") || "£345,000";
-  const avgPriceEng = getRowEngland(housing, "average");
-
   const degree = extractPct(getRowVal(edu, "degree") || "28.3%");
   const degreeEng = getRowEngland(edu, "degree");
   const noQuals = extractPct(getRowVal(edu, "no qual") || "17.8%");
@@ -250,7 +247,7 @@ export default function CommonsLibraryPanel() {
   return (
     <div className="space-y-5">
       {/* ── Hero Stats Row ── */}
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         <div className="bg-muted rounded-xl p-3">
           <HeroStat value={population} label="Population" color="text-blue-400" />
         </div>
@@ -262,13 +259,6 @@ export default function CommonsLibraryPanel() {
             <div className="text-2xl font-black tracking-tight text-amber-400">{medianAge}</div>
             <div className="text-[10px] text-zinc-500 mt-0.5">Median Age</div>
             <Delta local={medianAge} national={medianAgeEng} />
-          </div>
-        </div>
-        <div className="bg-muted rounded-xl p-3">
-          <div className="text-center">
-            <div className="text-2xl font-black tracking-tight text-purple-400">{avgPrice}</div>
-            <div className="text-[10px] text-zinc-500 mt-0.5">Avg House Price</div>
-            <Delta local={avgPrice} national={avgPriceEng} />
           </div>
         </div>
       </div>
