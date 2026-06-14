@@ -112,7 +112,21 @@ export default function ConstituencyMap() {
   });
 
   const toggleLayer = useCallback((id: string) => {
-    setLayers((prev) => ({ ...prev, [id]: !prev[id] }));
+    setLayers((prev) => {
+      const newLayers = { ...prev, [id]: !prev[id] };
+      // Choropleth fill layers are mutually exclusive
+      if (id === "wards-deprivation" && newLayers["wards-deprivation"]) {
+        newLayers["wards-vote"] = false;
+        newLayers["wards-prediction"] = false;
+      } else if (id === "wards-vote" && newLayers["wards-vote"]) {
+        newLayers["wards-deprivation"] = false;
+        newLayers["wards-prediction"] = false;
+      } else if (id === "wards-prediction" && newLayers["wards-prediction"]) {
+        newLayers["wards-vote"] = false;
+        newLayers["wards-deprivation"] = false;
+      }
+      return newLayers;
+    });
   }, []);
 
   // Initialize map
