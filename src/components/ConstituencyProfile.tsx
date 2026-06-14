@@ -29,8 +29,8 @@ export default function ConstituencyProfile() {
     { icon: <Building2 className="h-3.5 w-3.5" />, label: "Party", value: party },
     {
       icon: <Users className="h-3.5 w-3.5" />,
-      label: "Population",
-      value: population != null ? population.toLocaleString() : "—",
+      label: population != null ? "Population" : "Electorate",
+      value: (population ?? electorate).toLocaleString(),
     },
     { icon: <MapPin className="h-3.5 w-3.5" />, label: "Electorate", value: electorate.toLocaleString() },
   ];
