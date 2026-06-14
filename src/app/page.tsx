@@ -308,9 +308,6 @@ function Dashboard() {
                 title="Ward Explorer"
                 icon={<LayoutGrid className="h-3.5 w-3.5" />}
                 className="lg:col-span-12"
-                headerAction={
-                  <span className="text-[9px] text-zinc-600 uppercase tracking-wider">28 WARDS</span>
-                }
               >
                 <WardDataHub />
               </Panel>

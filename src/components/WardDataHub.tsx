@@ -8,6 +8,7 @@ import {
   demographics,
   type DemographicSet,
 } from "@/data/braintree";
+import { useConstituency } from "@/hooks/useConstituency";
 
 /* ── helpers ────────────────────────────────────────────────── */
 
@@ -164,6 +165,7 @@ function DemoSection({
    ══════════════════════════════════════════════════════════════ */
 
 export default function WardDataHub() {
+  const { slug, name: constituencyName } = useConstituency();
   const wards = useMemo(buildWards, []);
   const [selected, setSelected] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("name");
@@ -194,6 +196,16 @@ export default function WardDataHub() {
 
   const arrow = (key: SortKey) =>
     sortKey === key ? (sortDir === "asc" ? " \u25B2" : " \u25BC") : "";
+
+  if (slug !== "braintree") {
+    return (
+      <div className="p-4 text-center">
+        <div className="text-xs text-zinc-500">
+          Ward-level data not yet available for {constituencyName}.
+        </div>
+      </div>
+    );
+  }
 
   const detail = selected ? wards.find((w) => w.name === selected) : null;
   const detailDemo: DemographicSet | null =
