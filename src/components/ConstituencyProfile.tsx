@@ -1,6 +1,6 @@
 "use client";
 
-import { MapPin, User, Building2, Users } from "lucide-react";
+import { User, Building2, Users } from "lucide-react";
 import { useConstituency } from "@/hooks/useConstituency";
 import { getFullData } from "@/data";
 export default function ConstituencyProfile() {
@@ -17,7 +17,6 @@ export default function ConstituencyProfile() {
 
   const mpName = data.mp?.name ?? data.constituency.mp;
   const party = data.constituency.party;
-  const electorate = data.constituency.electorate;
   const population = data.constituency.population ?? null;
 
   const localAuthorities = (data.areas?.lads ?? []).map((lad) => lad.name);
@@ -27,14 +26,10 @@ export default function ConstituencyProfile() {
   const stats = [
     { icon: <User className="h-3.5 w-3.5" />, label: "MP", value: mpName },
     { icon: <Building2 className="h-3.5 w-3.5" />, label: "Party", value: party },
-    {
-      icon: <Users className="h-3.5 w-3.5" />,
-      label: population != null ? "Population" : "Electorate",
-      value: (population ?? electorate).toLocaleString(),
-    },
-    // Only show dedicated Electorate card when Population is already shown above
+    // Population shown only when sourced — electorate is already visible in
+    // ElectoralIntel directly below this panel so we don't repeat it here.
     ...(population != null
-      ? [{ icon: <MapPin className="h-3.5 w-3.5" />, label: "Electorate", value: electorate.toLocaleString() }]
+      ? [{ icon: <Users className="h-3.5 w-3.5" />, label: "Population", value: population.toLocaleString() }]
       : []),
   ];
 

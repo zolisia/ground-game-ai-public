@@ -132,6 +132,25 @@ export default function CQCPanel() {
   const locations = data.locations ?? [];
   const total = data.totalFound ?? locations.length;
 
+  // API returns 403 — show a clean empty state rather than four zeros
+  if (total === 0) {
+    return (
+      <div className="p-4 space-y-2 text-center">
+        <p className="text-xs text-zinc-500">
+          CQC provider data not currently available for this constituency.
+        </p>
+        <a
+          href={`https://www.cqc.org.uk/search/services`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[11px] text-emerald-500 hover:text-emerald-400 transition-colors"
+        >
+          Search care providers on cqc.org.uk ↗
+        </a>
+      </div>
+    );
+  }
+
   const summaryCards = [
     {
       key: "outstanding",
