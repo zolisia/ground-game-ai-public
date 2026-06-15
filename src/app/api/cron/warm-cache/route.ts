@@ -1,19 +1,23 @@
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // 5 min — Vercel Pro limit
 
-// Refreshes all Firestore-cached routes for all constituencies on a schedule.
-// Vercel calls this endpoint automatically and injects:
-//   Authorization: Bearer <CRON_SECRET>
+// Cache warming cron endpoint. Vercel calls this on the schedules in vercel.json
+// and injects:  Authorization: Bearer <CRON_SECRET>
 // Add CRON_SECRET to your Vercel environment variables.
 //
-// Schedule is set in vercel.json:
-//   - Full refresh: every 2 hours
-//   - Floods only:  every 30 minutes (live emergency data)
+// Three scopes (set in vercel.json):
 //
-// Each route is called with ?force=1 which bypasses the cached read
-// and always fetches fresh data from external APIs.
+//   scope=live   every 30 min  — flood alerts only for priority 9 constituencies
+//   scope=full   every 2 hours — all routes for priority 9 constituencies
+//   scope=deep   daily at 4am  — key routes for ALL 650 constituencies in parallel
+//                                batches so the cache is fully warm before the
+//                                business day. Skips routes that are expensive or
+//                                blocked (ai-brief, cqc).
 
-const SLUGS = [
+import { CONSTITUENCIES } from "@/data/constituencies";
+
+// Priority constituencies — always fully warmed every 2 hours
+const PRIORITY_SLUGS = [
   "braintree",
   "clacton",
   "walthamstow",
@@ -24,6 +28,9 @@ const SLUGS = [
   "streatham-and-croydon-north",
   "lewisham-east",
 ];
+
+// All 650 constituencies — used for the 4am deep run
+const ALL_SLUGS = CONSTITUENCIES.map((c) => c.slug);
 
 const CENSUS_TOPICS = [
   "age-under16",
@@ -40,7 +47,7 @@ const CENSUS_TOPICS = [
   "country-born-uk",
 ];
 
-// Routes refreshed every 2 hours (full run)
+// Full route set — used for priority constituencies every 2 hours
 const STANDARD_ROUTES = [
   "/api/crime",
   "/api/commons-library",
@@ -55,19 +62,39 @@ const STANDARD_ROUTES = [
   "/api/electoral-calculus",
 ];
 
-// Routes refreshed every 30 minutes (live data only)
+// Routes warmed every 30 minutes (live data only)
 const LIVE_ROUTES = ["/api/floods"];
 
-async function warmSlug(baseUrl: string, slug: string, routes: string[]): Promise<{ ok: number; failed: string[] }> {
-  const urls = [
-    ...routes.map((r) => `${baseUrl}${r}?constituency=${slug}&force=1`),
-  ];
+// Routes warmed in the 4am deep run for all 650 constituencies.
+// Excludes: ai-brief (costs money), cqc (API returns 403).
+// Census is handled separately to avoid 12×650=7800 simultaneous calls.
+const DEEP_ROUTES = [
+  "/api/crime",
+  "/api/commons-library",
+  "/api/house-prices",
+  "/api/employment",
+  "/api/planning",
+  "/api/floods",
+  "/api/electoral-calculus",
+];
 
-  const results = await Promise.allSettled(
-    urls.map((url) =>
-      fetch(url, { signal: AbortSignal.timeout(30_000) }).then((r) => ({ url, ok: r.ok }))
-    )
-  );
+async function hitUrl(url: string): Promise<{ ok: boolean; url: string }> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+    return { ok: res.ok, url };
+  } catch {
+    return { ok: false, url };
+  }
+}
+
+// Warm a single slug — all provided routes in parallel
+async function warmSlug(
+  baseUrl: string,
+  slug: string,
+  routes: string[]
+): Promise<{ ok: number; failed: string[] }> {
+  const urls = routes.map((r) => `${baseUrl}${r}?constituency=${slug}&force=1`);
+  const results = await Promise.allSettled(urls.map(hitUrl));
 
   const failed: string[] = [];
   let ok = 0;
@@ -82,72 +109,103 @@ async function warmSlug(baseUrl: string, slug: string, routes: string[]): Promis
   return { ok, failed };
 }
 
-async function warmCensus(baseUrl: string): Promise<{ ok: number; failed: string[] }> {
-  const urls = SLUGS.flatMap((slug) =>
-    CENSUS_TOPICS.map((t) => `${baseUrl}/api/census?constituency=${slug}&topic=${t}&force=1`)
+// Warm a batch of slugs in parallel (used by deep scope)
+async function warmBatch(
+  baseUrl: string,
+  slugs: string[],
+  routes: string[]
+): Promise<{ ok: number; failed: number }> {
+  const results = await Promise.allSettled(
+    slugs.map((slug) => warmSlug(baseUrl, slug, routes))
+  );
+  let ok = 0;
+  let failed = 0;
+  for (const r of results) {
+    if (r.status === "fulfilled") {
+      ok += r.value.ok;
+      failed += r.value.failed.length;
+    } else {
+      failed++;
+    }
+  }
+  return { ok, failed };
+}
+
+// Census warming — batched to avoid hammering NOMIS
+async function warmCensus(
+  baseUrl: string,
+  slugs: string[]
+): Promise<{ ok: number; failed: number }> {
+  const urls = slugs.flatMap((slug) =>
+    CENSUS_TOPICS.map(
+      (t) => `${baseUrl}/api/census?constituency=${slug}&topic=${t}&force=1`
+    )
   );
 
-  // Census hits NOMIS — batch in groups of 9 (one per constituency per topic at a time)
-  // rather than firing all 108 at once.
-  const failed: string[] = [];
   let ok = 0;
+  let failed = 0;
   for (let i = 0; i < urls.length; i += 9) {
     const batch = urls.slice(i, i + 9);
-    const results = await Promise.allSettled(
-      batch.map((url) =>
-        fetch(url, { signal: AbortSignal.timeout(30_000) }).then((r) => ({ url, ok: r.ok }))
-      )
-    );
+    const results = await Promise.allSettled(batch.map(hitUrl));
     for (const r of results) {
-      if (r.status === "fulfilled" && r.value.ok) {
-        ok++;
-      } else {
-        const url = r.status === "fulfilled" ? r.value.url : "unknown";
-        failed.push(url.replace(baseUrl, ""));
-      }
+      if (r.status === "fulfilled" && r.value.ok) ok++;
+      else failed++;
     }
   }
   return { ok, failed };
 }
 
 export async function GET(request: Request) {
-  // Verify Vercel cron secret
   const auth = request.headers.get("authorization");
   if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const { searchParams, origin } = new URL(request.url);
-  const scope = searchParams.get("scope") ?? "full"; // "full" | "live"
+  const scope = searchParams.get("scope") ?? "full";
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? origin;
 
   const started = Date.now();
-  const summary: Record<string, { ok: number; failed: string[] }> = {};
+  let totalOk = 0;
+  let totalFailed = 0;
 
   if (scope === "live") {
-    // 30-min cron: only live routes (floods)
-    for (const slug of SLUGS) {
-      const result = await warmSlug(baseUrl, slug, LIVE_ROUTES);
-      if (result.failed.length) summary[slug] = result;
+    // Every 30 min: flood alerts only for priority constituencies
+    for (const slug of PRIORITY_SLUGS) {
+      const r = await warmSlug(baseUrl, slug, LIVE_ROUTES);
+      totalOk += r.ok;
+      totalFailed += r.failed.length;
     }
-  } else {
-    // 2-hour cron: all standard routes + census
-    for (const slug of SLUGS) {
-      const result = await warmSlug(baseUrl, slug, [...STANDARD_ROUTES, ...LIVE_ROUTES]);
-      if (result.failed.length) summary[slug] = result;
+  } else if (scope === "full") {
+    // Every 2 hours: all routes for priority 9 constituencies + census
+    for (const slug of PRIORITY_SLUGS) {
+      const r = await warmSlug(baseUrl, slug, [...STANDARD_ROUTES, ...LIVE_ROUTES]);
+      totalOk += r.ok;
+      totalFailed += r.failed.length;
     }
-    for (const slug of SLUGS) {
-      await fetch(`${baseUrl}/api/trends-v2?constituency=${slug}&force=1`, { signal: AbortSignal.timeout(60_000) }).catch(() => null);
-    }
+    await fetch(`${baseUrl}/api/trends-v2?force=1`, {
+      signal: AbortSignal.timeout(60_000),
+    }).catch(() => null);
 
-    const censusResult = await warmCensus(baseUrl);
-    if (censusResult.failed.length) summary["census"] = censusResult;
+    const census = await warmCensus(baseUrl, PRIORITY_SLUGS);
+    totalOk += census.ok;
+    totalFailed += census.failed;
+  } else if (scope === "deep") {
+    // 4am daily: key routes for ALL 650 constituencies in parallel batches of 30
+    const BATCH_SIZE = 30;
+    for (let i = 0; i < ALL_SLUGS.length; i += BATCH_SIZE) {
+      const batch = ALL_SLUGS.slice(i, i + BATCH_SIZE);
+      const r = await warmBatch(baseUrl, batch, DEEP_ROUTES);
+      totalOk += r.ok;
+      totalFailed += r.failed;
+    }
   }
 
   return Response.json({
     scope,
-    slugs: SLUGS.length,
+    slugs: scope === "deep" ? ALL_SLUGS.length : PRIORITY_SLUGS.length,
+    totalOk,
+    totalFailed,
     durationMs: Date.now() - started,
-    failures: summary,
   });
 }

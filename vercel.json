@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/warm-cache?scope=full",
       "schedule": "0 */2 * * *"
+    },
+    {
+      "path": "/api/cron/warm-cache?scope=deep",
+      "schedule": "0 4 * * *"
     }
   ]
 }
