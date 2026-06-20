@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState, useCallback, useEffect } from "react";
+import { useRouter, usePathname } from "next/navigation";
 import Header, { TabId } from "@/components/Header";
 import Panel from "@/components/Panel";
 import dynamic from "next/dynamic";
+import { useConstituency, withConstituency, type ConstituencySlug } from "@/hooks/useConstituency";
 
 const ConstituencyMap = dynamic(() => import("@/components/ConstituencyMap"), {
   ssr: false,
@@ -65,12 +67,71 @@ import {
   LayoutGrid,
 } from "lucide-react";
 
-export default function Dashboard() {
+export default function DashboardPage() {
+  // useSearchParams must be wrapped in Suspense in the App Router.
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-background" />}>
+      <Dashboard />
+    </Suspense>
+  );
+}
+
+function formatCachedAt(ts: number): string {
+  const d = new Date(ts);
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const tsDayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const timeStr = d.toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit", hour12: true });
+  if (tsDayStart === todayStart) {
+    return d.getHours() < 12 ? `Data from this morning, ${timeStr}` : `Data from today, ${timeStr}`;
+  }
+  if (tsDayStart === todayStart - 86400000) {
+    return `Data from yesterday, ${timeStr}`;
+  }
+  return `Data from ${d.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}, ${timeStr}`;
+}
+
+function Dashboard() {
   const [activeTab, setActiveTab] = useState<TabId>("map");
+  const { slug: constituencySlug, name: constituencyName } = useConstituency();
+  const router = useRouter();
+  const pathname = usePathname();
+  const [dataCachedAt, setDataCachedAt] = useState<number | null>(null);
+
+  useEffect(() => {
+    setDataCachedAt(null);
+    fetch(withConstituency("/api/employment", constituencySlug))
+      .then(r => r.json())
+      .then((d: { _cachedAt?: number }) => { if (d._cachedAt) setDataCachedAt(d._cachedAt); })
+      .catch(() => {});
+  }, [constituencySlug]);
+
+  const handleConstituencyChange = useCallback(
+    (next: ConstituencySlug) => {
+      // Persist selection in URL so the page is shareable. Components read
+      // the slug from URL via the useConstituency hook and will re-fetch
+      // when their useEffect dependencies update.
+      const qs = new URLSearchParams(window.location.search);
+      qs.set("constituency", next);
+      router.replace(`${pathname}?${qs.toString()}`);
+    },
+    [router, pathname]
+  );
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] flex flex-col">
-      <Header activeTab={activeTab} onTabChange={setActiveTab} />
+    <div className="min-h-screen bg-background flex flex-col">
+      <Header
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        constituencySlug={constituencySlug}
+        onConstituencyChange={handleConstituencyChange}
+      />
+
+      {dataCachedAt !== null && (
+        <div className="px-4 py-1 border-b border-border">
+          <span className="text-[10px] text-zinc-600">{formatCachedAt(dataCachedAt)}</span>
+        </div>
+      )}
 
       <main className="flex-1 p-2 lg:p-3">
         <div className="max-w-[1800px] mx-auto">
@@ -89,7 +150,7 @@ export default function Dashboard() {
 
               {/* Profile sidebar */}
               <Panel
-                title="Braintree"
+                title={constituencyName}
                 icon={<Users className="h-3.5 w-3.5" />}
                 className="lg:col-span-4"
               >
@@ -247,9 +308,6 @@ export default function Dashboard() {
                 title="Ward Explorer"
                 icon={<LayoutGrid className="h-3.5 w-3.5" />}
                 className="lg:col-span-12"
-                headerAction={
-                  <span className="text-[9px] text-zinc-600 uppercase tracking-wider">28 WARDS</span>
-                }
               >
                 <WardDataHub />
               </Panel>

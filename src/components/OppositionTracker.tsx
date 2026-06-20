@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ExternalLink, AlertCircle, RefreshCw } from "lucide-react";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 interface OpponentPost {
   text: string;
@@ -36,6 +37,7 @@ const ACTIVITY_INDICATORS: Record<string, { dot: string; label: string }> = {
 };
 
 export default function OppositionTracker() {
+  const { slug } = useConstituency();
   const [data, setData] = useState<OppositionData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -45,7 +47,7 @@ export default function OppositionTracker() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/opposition");
+      const res = await fetch(withConstituency("/api/opposition", slug));
       if (!res.ok) throw new Error("Failed to fetch opposition data");
       const json: OppositionData = await res.json();
       setData(json);
@@ -58,7 +60,8 @@ export default function OppositionTracker() {
 
   useEffect(() => {
     fetchData();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
 
   if (loading) {
     return (
@@ -66,13 +69,13 @@ export default function OppositionTracker() {
         {[...Array(4)].map((_, i) => (
           <div key={i} className="animate-pulse">
             <div className="flex items-center gap-3 mb-2">
-              <div className="h-8 w-8 bg-zinc-800 rounded-full" />
+              <div className="h-8 w-8 bg-muted rounded-full" />
               <div className="flex-1 space-y-1.5">
-                <div className="h-3.5 bg-zinc-800 rounded w-1/3" />
-                <div className="h-2.5 bg-zinc-800/50 rounded w-1/4" />
+                <div className="h-3.5 bg-muted rounded w-1/3" />
+                <div className="h-2.5 bg-muted/50 rounded w-1/4" />
               </div>
             </div>
-            <div className="h-2.5 bg-zinc-800/30 rounded w-full mt-2" />
+            <div className="h-2.5 bg-muted/30 rounded w-full mt-2" />
           </div>
         ))}
       </div>
@@ -99,7 +102,7 @@ export default function OppositionTracker() {
   return (
     <div>
       {data.source === "candidates_only" && (
-        <div className="px-4 py-2 bg-zinc-800/40 border-b border-zinc-700/30 flex items-center justify-between">
+        <div className="px-4 py-2 bg-muted/40 border-b border-border/30 flex items-center justify-between">
           <span className="text-[11px] text-zinc-500">
             Showing 2024 election candidates — social activity monitoring not yet configured
           </span>
@@ -115,7 +118,7 @@ export default function OppositionTracker() {
             <div key={opponent.party}>
               <button
                 onClick={() => setExpandedParty(isExpanded ? null : opponent.party)}
-                className="w-full px-4 py-3 hover:bg-zinc-800/30 transition-colors text-left"
+                className="w-full px-4 py-3 hover:bg-muted/30 transition-colors text-left"
               >
                 <div className="flex items-center gap-3">
                   {/* Party color badge */}
@@ -167,7 +170,7 @@ export default function OppositionTracker() {
                   {opponent.recentPosts.map((post, i) => (
                     <div
                       key={i}
-                      className="ml-11 p-2.5 bg-zinc-800/40 rounded-md border border-zinc-800/60"
+                      className="ml-11 p-2.5 bg-muted/40 rounded-md border border-border/60"
                     >
                       <p className="text-xs text-zinc-300 leading-relaxed line-clamp-3">
                         {post.text}
@@ -207,7 +210,7 @@ export default function OppositionTracker() {
       </div>
 
       {/* Footer */}
-      <div className="px-4 py-2 border-t border-zinc-800/50 flex items-center justify-between text-[11px] text-zinc-600">
+      <div className="px-4 py-2 border-t border-border/50 flex items-center justify-between text-[11px] text-zinc-600">
         <span>
           Updated {formatDate(data.lastUpdated)}
         </span>

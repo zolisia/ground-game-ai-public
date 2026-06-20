@@ -8,6 +8,7 @@ import {
   demographics,
   type DemographicSet,
 } from "@/data/braintree";
+import { useConstituency } from "@/hooks/useConstituency";
 
 /* ── helpers ────────────────────────────────────────────────── */
 
@@ -82,7 +83,7 @@ function VoteBar({ label, pct, color }: { label: string; pct: number; color: str
   return (
     <div className="flex items-center gap-2 text-[11px]">
       <span className="w-10 text-zinc-500 text-right shrink-0">{label}</span>
-      <div className="flex-1 h-3 bg-zinc-800 rounded-full overflow-hidden">
+      <div className="flex-1 h-3 bg-muted rounded-full overflow-hidden">
         <div
           className="h-full rounded-full transition-all duration-500"
           style={{ width: `${pct}%`, backgroundColor: color }}
@@ -164,6 +165,7 @@ function DemoSection({
    ══════════════════════════════════════════════════════════════ */
 
 export default function WardDataHub() {
+  const { slug, name: constituencyName } = useConstituency();
   const wards = useMemo(buildWards, []);
   const [selected, setSelected] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("name");
@@ -195,6 +197,16 @@ export default function WardDataHub() {
   const arrow = (key: SortKey) =>
     sortKey === key ? (sortDir === "asc" ? " \u25B2" : " \u25BC") : "";
 
+  if (slug !== "braintree") {
+    return (
+      <div className="p-4 text-center">
+        <div className="text-xs text-zinc-500">
+          Ward-level data not yet available for {constituencyName}.
+        </div>
+      </div>
+    );
+  }
+
   const detail = selected ? wards.find((w) => w.name === selected) : null;
   const detailDemo: DemographicSet | null =
     selected && wardDemographics[selected] ? wardDemographics[selected] : null;
@@ -202,10 +214,10 @@ export default function WardDataHub() {
   return (
     <div className="p-3 space-y-3">
       {/* ── SUMMARY TABLE ──────────────────────────────────── */}
-      <div className="overflow-x-auto rounded-xl border border-zinc-800">
+      <div className="overflow-x-auto rounded-xl border border-border">
         <table className="w-full text-[10px]">
           <thead>
-            <tr className="bg-zinc-900/60 text-zinc-500 uppercase tracking-wider">
+            <tr className="bg-muted/60 text-zinc-500 uppercase tracking-wider">
               <th
                 className="text-left px-2 py-1.5 cursor-pointer hover:text-zinc-300 transition-colors"
                 onClick={() => toggleSort("name")}
@@ -246,10 +258,10 @@ export default function WardDataHub() {
             {sorted.map((w) => (
               <tr
                 key={w.name}
-                className={`border-t border-zinc-800/60 cursor-pointer transition-colors ${
+                className={`border-t border-border/60 cursor-pointer transition-colors ${
                   selected === w.name
                     ? "bg-emerald-500/10"
-                    : "hover:bg-zinc-800/40"
+                    : "hover:bg-muted/40"
                 }`}
                 onClick={() => setSelected(selected === w.name ? null : w.name)}
               >
@@ -267,7 +279,7 @@ export default function WardDataHub() {
                 <td className="text-center px-2 py-1.5">
                   <span
                     className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-medium ${
-                      depBg[w.deprivation] ?? "bg-zinc-800 text-zinc-400"
+                      depBg[w.deprivation] ?? "bg-muted text-zinc-400"
                     }`}
                   >
                     {w.deprivation}
@@ -305,7 +317,7 @@ export default function WardDataHub() {
 
       {/* ── DETAIL CARD ────────────────────────────────────── */}
       {detail && (
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 space-y-4">
+        <div className="rounded-xl border border-border bg-muted/40 p-4 space-y-4">
           {/* header */}
           <div className="flex items-start justify-between">
             <div>
@@ -342,7 +354,7 @@ export default function WardDataHub() {
 
           {/* electoral */}
           <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-lg bg-zinc-800/50 p-3">
+            <div className="rounded-lg bg-muted/50 p-3">
               <div className="text-[9px] text-zinc-500 uppercase tracking-wider mb-1">2024 Winner</div>
               <span
                 className={`text-sm font-bold ${
@@ -352,7 +364,7 @@ export default function WardDataHub() {
                 {detail.winner2024}
               </span>
             </div>
-            <div className="rounded-lg bg-zinc-800/50 p-3">
+            <div className="rounded-lg bg-muted/50 p-3">
               <div className="text-[9px] text-zinc-500 uppercase tracking-wider mb-1">Predicted</div>
               <span
                 className={`text-sm font-bold ${

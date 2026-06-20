@@ -1,12 +1,21 @@
 import { NextResponse } from "next/server";
+import type { DocumentReference } from "firebase-admin/firestore";
+import { adminDb } from "@/lib/firebase-admin";
+import { getFullData } from "@/data";
 
-// Force dynamic — fetches live external data
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 // Nomis / ONS Claimant Count — free, no auth required
-// Dataset NM_162_1: Claimant count by constituency
-// NOMIS geography code 721420347 = Braintree (wpca24 constituency type)
-const CONSTITUENCY_CODE = "721420347";
+// Dataset NM_162_1: Claimant count by constituency (wpca24 geography type).
+
+const TTL_MS = 24 * 60 * 60 * 1000;
+
+// Braintree-only fallback. Used when the data layer doesn't yet have a wpca24
+// constituency code for the requested constituency. See REFACTOR_AUDIT.md §5
+// (missing data) for the per-constituency wpca24Code sourcing task.
+const BRAINTREE_WPCA24 = "721420347";
+
 const BASE_URL = "https://www.nomisweb.co.uk/api/v01/dataset/NM_162_1.data.json";
 
 interface NomisNestedField {
@@ -22,6 +31,14 @@ interface NomisObs {
   age: NomisNestedField;
   unit: NomisNestedField;
   obs_status: NomisNestedField;
+}
+
+interface UniversalCreditData {
+  current: { count: number | null; rate: number | null; date: string | null };
+  trend: { date: string; count: number }[];
+  byAge: { label: string; count: number; percentage: number }[];
+  source: string;
+  sourceUrl: string;
 }
 
 function getVal(field: NomisNestedField | undefined): number {
@@ -50,7 +67,7 @@ function buildMonthRange(n: number): string {
   return months.join(",");
 }
 
-export async function GET() {
+async function generateFreshData(wpca24Code: string): Promise<UniversalCreditData | null> {
   try {
     const timeRange = buildMonthRange(12);
 
@@ -58,17 +75,17 @@ export async function GET() {
     const [currentRes, trendRes, ageRes] = await Promise.allSettled([
       // Latest count + rate
       fetch(
-        `${BASE_URL}?geography=${CONSTITUENCY_CODE}&time=latestMINUS2&measures=20100,20201&gender=0&age=0`,
+        `${BASE_URL}?geography=${wpca24Code}&time=latestMINUS2&measures=20100,20201&gender=0&age=0`,
         { next: { revalidate: 86400 } }
       ),
       // Last 12 months trend — count only
       fetch(
-        `${BASE_URL}?geography=${CONSTITUENCY_CODE}&time=${timeRange}&measures=20100&gender=0&age=0`,
+        `${BASE_URL}?geography=${wpca24Code}&time=${timeRange}&measures=20100&gender=0&age=0`,
         { next: { revalidate: 86400 } }
       ),
       // Age breakdown — latest month, all age bands
       fetch(
-        `${BASE_URL}?geography=${CONSTITUENCY_CODE}&time=latestMINUS2&measures=20100&gender=0&c_age=1...10`,
+        `${BASE_URL}?geography=${wpca24Code}&time=latestMINUS2&measures=20100&gender=0&c_age=1...10`,
         { next: { revalidate: 86400 } }
       ),
     ]);
@@ -99,7 +116,7 @@ export async function GET() {
     if (!current.count) {
       try {
         const fb = await fetch(
-          `${BASE_URL}?geography=${CONSTITUENCY_CODE}&time=latestMINUS3&measures=20100&gender=0&age=0`,
+          `${BASE_URL}?geography=${wpca24Code}&time=latestMINUS3&measures=20100&gender=0&age=0`,
           { next: { revalidate: 86400 } }
         );
         if (fb.ok) {
@@ -153,18 +170,113 @@ export async function GET() {
       }
     }
 
-    return NextResponse.json({
+    return {
       current,
       trend,
       byAge,
       source: current.count !== null ? "live" : "empty",
       sourceUrl: "https://www.nomisweb.co.uk/",
-    });
+    };
   } catch (err) {
     console.error("Universal Credit API error:", err);
+    return null;
+  }
+}
+
+async function fetchAndUpdateCache(cacheDocRef: DocumentReference, wpca24Code: string) {
+  try {
+    const fresh = await generateFreshData(wpca24Code);
+    if (!fresh) return;
+
+    const existing = await cacheDocRef.get();
+    const existingData = existing.data()?.data ?? null;
+
+    if (existingData && JSON.stringify(existingData) === JSON.stringify(fresh)) {
+      return;
+    }
+
+    await cacheDocRef.set({
+      data: fresh,
+      updated_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("Background universal credit cache update failed:", err);
+  }
+}
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const constituencySlug = searchParams.get("constituency") || "braintree";
+  const force = searchParams.get("force") === "1";
+  const constituencyData = getFullData(constituencySlug);
+
+  if (!constituencyData) {
+    return Response.json(
+      { error: "Invalid constituency slug" },
+      { status: 400 }
+    );
+  }
+
+  // Try data-layer wpca24Code (forward-compatible — not yet declared on the
+  // Constituency type), fall back to Braintree's hardcoded code. The cast
+  // becomes a no-op once wpca24Code is added to the Constituency interface.
+  const constituencyWithWpca24 = constituencyData.constituency as {
+    wpca24Code?: string;
+  };
+  const CONSTITUENCY_CODE =
+    constituencyWithWpca24.wpca24Code ??
+    (constituencySlug === "braintree" ? BRAINTREE_WPCA24 : null);
+
+  if (!CONSTITUENCY_CODE) {
+    return Response.json(
+      {
+        error: "Universal Credit data not available",
+        message: "NOMIS wpca24Code not yet sourced for this constituency",
+        constituency: constituencySlug,
+      },
+      { status: 400 }
+    );
+  }
+
+  const cacheDocRef = adminDb.collection("universal_credit_cache").doc(constituencySlug);
+
+  type CacheDoc = { data: Record<string, unknown>; updated_at: string };
+  let cached: CacheDoc | null = null;
+  try {
+    const snap = await cacheDocRef.get();
+    if (snap.exists) {
+      cached = snap.data() as CacheDoc;
+    }
+  } catch (err) {
+    console.warn("Universal Credit cache read failed (continuing without cache):", err);
+  }
+
+  if (cached && !force) {
+    const cacheAge = Date.now() - new Date(cached.updated_at).getTime();
+    if (cacheAge > TTL_MS) {
+      fetchAndUpdateCache(cacheDocRef, CONSTITUENCY_CODE)
+        .catch(err => console.warn("Universal Credit background refresh failed:", err));
+    }
+    return NextResponse.json({ ...cached.data, source: "cache", _cachedAt: new Date(cached.updated_at).getTime() });
+  }
+
+  const fresh = await generateFreshData(CONSTITUENCY_CODE);
+  if (!fresh) {
     return NextResponse.json(
       { current: null, trend: [], byAge: [], error: "Failed to fetch claimant count data" },
       { status: 500 }
     );
   }
+
+  const cachedAt = Date.now();
+  try {
+    await cacheDocRef.set({
+      data: fresh,
+      updated_at: new Date(cachedAt).toISOString(),
+    });
+  } catch (err) {
+    console.warn("Universal Credit cache write failed (returning fresh anyway):", err);
+  }
+
+  return NextResponse.json({ ...fresh, _cachedAt: cachedAt });
 }

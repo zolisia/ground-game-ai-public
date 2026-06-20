@@ -18,11 +18,12 @@ interface Channel {
 // Sky News: 9Auq9mYxFEE — GB News: various, check channel
 // If a video ID stops working, the component falls back to a direct link
 const CHANNELS: Channel[] = [
+  // Live video IDs rotate. The /embed/live_stream?channel= form returns Error 153 (verified May 2026), so we hardcode and update manually when the embed breaks.
   {
     name: "Sky News",
     shortName: "SKY",
     type: "youtube",
-    youtubeVideoId: "9Auq9mYxFEE",
+    youtubeVideoId: "11Bog8oUYFk",
     directUrl: "https://www.youtube.com/@SkyNews/live",
     color: "bg-sky-600/20",
     textColor: "text-sky-400",
@@ -32,7 +33,7 @@ const CHANNELS: Channel[] = [
     name: "GB News",
     shortName: "GB",
     type: "youtube",
-    youtubeVideoId: "Uf5yDRjJsaM",
+    youtubeVideoId: "QliL4CGc7iY",
     directUrl: "https://www.youtube.com/@GBNews/live",
     color: "bg-red-600/20",
     textColor: "text-red-400",
@@ -57,14 +58,14 @@ const CHANNELS: Channel[] = [
     description: "BBC iPlayer (UK only)",
   },
   {
-    name: "LBC",
-    shortName: "LBC",
+    name: "Times Radio",
+    shortName: "TIMES",
     type: "youtube",
-    youtubeVideoId: "MHH7yBQkFbk",
-    directUrl: "https://www.youtube.com/@LBC/live",
-    color: "bg-amber-600/20",
-    textColor: "text-amber-400",
-    description: "24/7 live on YouTube",
+    youtubeVideoId: "eTIATpVxKbI",
+    directUrl: "https://www.youtube.com/@ListenToTimesRadio/live",
+    color: "bg-blue-700/20",
+    textColor: "text-blue-300",
+    description: "24/7 live talk radio from News UK",
   },
 ];
 
@@ -87,7 +88,7 @@ export default function LiveFeeds() {
   return (
     <div>
       {/* Channel selector strip */}
-      <div className="flex items-center border-b border-zinc-800/50">
+      <div className="flex items-center border-b border-border/50">
         {CHANNELS.map((ch, i) => (
           <button
             key={ch.name}
@@ -117,7 +118,7 @@ export default function LiveFeeds() {
             />
           </div>
         ) : (
-          <div className="flex flex-col items-center justify-center py-10 bg-zinc-950/80">
+          <div className="flex flex-col items-center justify-center py-10 bg-background/80">
             <div className={`p-3 rounded-full ${channel.color} mb-3`}>
               <Tv className={`h-6 w-6 ${channel.textColor}`} />
             </div>
@@ -140,7 +141,7 @@ export default function LiveFeeds() {
       </div>
 
       {/* Status bar */}
-      <div className="px-3 py-1.5 flex items-center justify-between border-t border-zinc-800/50">
+      <div className="px-3 py-1.5 flex items-center justify-between border-t border-border/50">
         <div className="flex items-center gap-1.5">
           <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
           <span className="text-[10px] text-red-400 font-semibold">LIVE</span>

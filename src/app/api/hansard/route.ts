@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server";
+import { getFullData } from "@/data";
 
 // Parliament Members API — public, no auth required
 // https://members-api.parliament.uk
 // TheyWorkForYou — for linking to debate pages
-
-const MP_ID = 4366; // James Cleverly, Braintree
-const TWFY_PERSON_ID = 11816; // TheyWorkForYou person ID
 
 interface WrittenQuestion {
   value: {
@@ -50,11 +48,46 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const type = searchParams.get("type") || "speeches"; // speeches | questions
 
+  const constituencySlug = searchParams.get("constituency") || "braintree";
+  const constituencyData = getFullData(constituencySlug);
+
+  if (!constituencyData) {
+    return Response.json(
+      { error: "Invalid constituency slug" },
+      { status: 400 }
+    );
+  }
+
+  if (!constituencyData.mp) {
+    return Response.json(
+      { error: "MP data not available for this constituency" },
+      { status: 400 }
+    );
+  }
+
+  const MP_ID = constituencyData.mp.memberId;
+  const TWFY_PERSON_ID = constituencyData.mp.twfyPersonId;
+  const MP_NAME = constituencyData.mp.name;
+  const CONSTITUENCY_SLUG = constituencyData.constituency.slug;
+
+  // Generate TWFY URL slug from MP name. NOTE: data-layer names may include
+  // honorifics (e.g. "Sir James Cleverly" → "sir_james_cleverly"), which TWFY
+  // may not recognise (their canonical URL uses "james_cleverly"). If TWFY
+  // links 404 for honored MPs, strip honorifics here — see /api/trends-v2's
+  // stripHonorific helper for the pattern.
+  const mpNameSlug = MP_NAME.toLowerCase().replace(/\s+/g, "_");
+
   try {
     if (type === "questions") {
-      return await getWrittenQuestions();
+      return await getWrittenQuestions(MP_ID);
     } else {
-      return await getRecentActivity();
+      return await getRecentActivity(
+        MP_ID,
+        MP_NAME,
+        TWFY_PERSON_ID,
+        mpNameSlug,
+        CONSTITUENCY_SLUG
+      );
     }
   } catch {
     return NextResponse.json(
@@ -65,14 +98,20 @@ export async function GET(request: Request) {
 }
 
 // Recent parliamentary activity — combines votes + EDMs since Hansard API is dead
-async function getRecentActivity() {
+async function getRecentActivity(
+  mpId: number,
+  mpName: string,
+  twfyPersonId: number | null,
+  mpNameSlug: string,
+  constituencySlug: string
+) {
   // Fetch latest votes and EDMs in parallel
   const [votesRes, edmsRes] = await Promise.allSettled([
-    fetch(`https://members-api.parliament.uk/api/Members/${MP_ID}/Voting?house=1&take=10`, {
+    fetch(`https://members-api.parliament.uk/api/Members/${mpId}/Voting?house=1&take=10`, {
       next: { revalidate: 3600 },
       headers: { Accept: "application/json" },
     }),
-    fetch(`https://members-api.parliament.uk/api/Members/${MP_ID}/Edms`, {
+    fetch(`https://members-api.parliament.uk/api/Members/${mpId}/Edms`, {
       next: { revalidate: 3600 },
       headers: { Accept: "application/json" },
     }),
@@ -106,7 +145,7 @@ async function getRecentActivity() {
         url: `https://www.theyworkforyou.com/divisions/pw-${v.value.date.substring(0, 10)}-${v.value.divisionNumber}-commons`,
         house: "Commons",
         type: "division",
-        speaker: "James Cleverly",
+        speaker: mpName,
       });
     }
   }
@@ -123,7 +162,7 @@ async function getRecentActivity() {
         url: `https://edm.parliament.uk/early-day-motion/${e.value.id}`,
         house: "Commons",
         type: "edm",
-        speaker: "James Cleverly",
+        speaker: mpName,
       });
     }
   }
@@ -138,12 +177,14 @@ async function getRecentActivity() {
   return NextResponse.json({
     speeches: activities,
     total: activities.length,
-    twfyUrl: `https://www.theyworkforyou.com/mp/${TWFY_PERSON_ID}/james_cleverly/braintree`,
+    twfyUrl: twfyPersonId
+      ? `https://www.theyworkforyou.com/mp/${twfyPersonId}/${mpNameSlug}/${constituencySlug}`
+      : undefined,
   });
 }
 
-async function getWrittenQuestions() {
-  const url = `https://members-api.parliament.uk/api/Members/${MP_ID}/WrittenQuestions?take=15`;
+async function getWrittenQuestions(mpId: number) {
+  const url = `https://members-api.parliament.uk/api/Members/${mpId}/WrittenQuestions?take=15`;
 
   const res = await fetch(url, {
     next: { revalidate: 3600 },

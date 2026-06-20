@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 interface SectionData {
   heading: string;
@@ -88,7 +89,7 @@ function MiniBar({ label, value, max = 100, color = "#34d399" }: { label: string
   return (
     <div className="flex items-center gap-2">
       <span className="text-[10px] text-zinc-400 w-36 shrink-0 truncate">{label}</span>
-      <div className="flex-1 h-2.5 bg-zinc-800 rounded-full overflow-hidden">
+      <div className="flex-1 h-2.5 bg-muted rounded-full overflow-hidden">
         <div
           className="h-full rounded-full transition-all duration-500"
           style={{ width: `${pct}%`, backgroundColor: color }}
@@ -138,33 +139,58 @@ function Delta({ local, national, invert = false }: { local: string; national: s
 }
 
 export default function CommonsLibraryPanel() {
+  const { slug } = useConstituency();
   const [data, setData] = useState<CommonsLibraryData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/commons-library")
+    fetch(withConstituency("/api/commons-library", slug))
       .then((res) => res.json())
       .then((d: CommonsLibraryData) => setData(d))
       .catch(() => setData(null))
       .finally(() => setLoading(false));
-  }, []);
+  }, [slug]);
 
   if (loading) {
     return (
       <div className="animate-pulse space-y-4">
         <div className="flex gap-4 justify-center">
           {[...Array(4)].map((_, i) => (
-            <div key={i} className="w-20 h-20 bg-zinc-800 rounded-full" />
+            <div key={i} className="w-20 h-20 bg-muted rounded-full" />
           ))}
         </div>
-        <div className="h-24 bg-zinc-900 rounded-xl" />
-        <div className="h-24 bg-zinc-900 rounded-xl" />
+        <div className="h-24 bg-muted rounded-xl" />
+        <div className="h-24 bg-muted rounded-xl" />
       </div>
     );
   }
 
   if (!data || data.sectionCount === 0) {
     return <p className="text-zinc-500 text-xs">Constituency profile data unavailable</p>;
+  }
+
+  // Gate on the presence of the grouped demographic sections. The route emits
+  // a `live` section for every constituency, but the population / economy /
+  // housing / etc. groups only appear for constituencies whose static profile
+  // has been sourced (currently Braintree only). Without this gate, the panel
+  // below would fall through to the hardcoded Braintree fallback strings on
+  // every `getRowVal(...) || "..."` line and silently misrepresent the data.
+  const hasDemographicProfile = !!(
+    data.sections.population?.[0]?.rows?.length ||
+    data.sections.economy?.[0]?.rows?.length ||
+    data.sections.housing?.[0]?.rows?.length
+  );
+  if (!hasDemographicProfile) {
+    return (
+      <div className="bg-muted/50 border border-border rounded-xl p-6 text-center">
+        <p className="text-zinc-400 text-sm font-medium mb-1">
+          Demographic profile not yet sourced
+        </p>
+        <p className="text-zinc-600 text-[11px]">
+          Census 2021 indicators for {data.constituency} haven&apos;t been added to the data layer yet.
+        </p>
+      </div>
+    );
   }
 
   // Extract key stats from the data
@@ -176,7 +202,7 @@ export default function CommonsLibraryPanel() {
   const dep = data.sections.deprivation?.[0]?.rows || [];
   const transport = data.sections.transport?.[0]?.rows || [];
 
-  const population = getRowVal(pop, "population") || "80,100";
+  const population = getRowVal(pop, "population") ?? "—";
   const electorate = getRowVal(pop, "electorate") || "77,781";
   const medianAge = getRowVal(pop, "median") || "43";
   const medianAgeEng = getRowEngland(pop, "median");
@@ -196,9 +222,6 @@ export default function CommonsLibraryPanel() {
   const ownerOccEng = getRowEngland(housing, "owner");
   const socialRent = extractPct(getRowVal(housing, "social") || "13.2%");
   const privateRent = extractPct(getRowVal(housing, "private") || "12.1%");
-  const avgPrice = getRowVal(housing, "average") || "£345,000";
-  const avgPriceEng = getRowEngland(housing, "average");
-
   const degree = extractPct(getRowVal(edu, "degree") || "28.3%");
   const degreeEng = getRowEngland(edu, "degree");
   const noQuals = extractPct(getRowVal(edu, "no qual") || "17.8%");
@@ -224,31 +247,24 @@ export default function CommonsLibraryPanel() {
   return (
     <div className="space-y-5">
       {/* ── Hero Stats Row ── */}
-      <div className="grid grid-cols-4 gap-3">
-        <div className="bg-zinc-900 rounded-xl p-3">
+      <div className="grid grid-cols-3 gap-3">
+        <div className="bg-muted rounded-xl p-3">
           <HeroStat value={population} label="Population" color="text-blue-400" />
         </div>
-        <div className="bg-zinc-900 rounded-xl p-3">
+        <div className="bg-muted rounded-xl p-3">
           <HeroStat value={electorate} label="Electorate" color="text-emerald-400" />
         </div>
-        <div className="bg-zinc-900 rounded-xl p-3">
+        <div className="bg-muted rounded-xl p-3">
           <div className="text-center">
             <div className="text-2xl font-black tracking-tight text-amber-400">{medianAge}</div>
             <div className="text-[10px] text-zinc-500 mt-0.5">Median Age</div>
             <Delta local={medianAge} national={medianAgeEng} />
           </div>
         </div>
-        <div className="bg-zinc-900 rounded-xl p-3">
-          <div className="text-center">
-            <div className="text-2xl font-black tracking-tight text-purple-400">{avgPrice}</div>
-            <div className="text-[10px] text-zinc-500 mt-0.5">Avg House Price</div>
-            <Delta local={avgPrice} national={avgPriceEng} />
-          </div>
-        </div>
       </div>
 
       {/* ── Donut Charts Row: Key Percentages ── */}
-      <div className="bg-zinc-900 rounded-xl p-4">
+      <div className="bg-muted rounded-xl p-4">
         <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-3 font-medium">
           Key Indicators
         </div>
@@ -262,22 +278,22 @@ export default function CommonsLibraryPanel() {
       </div>
 
       {/* ── Economy ── */}
-      <div className="bg-zinc-900 rounded-xl p-4">
+      <div className="bg-muted rounded-xl p-4">
         <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-3 font-medium">
-          💷 Jobs & Economy
+          Jobs & Economy
         </div>
         <div className="grid grid-cols-3 gap-3 mb-3">
-          <div className="bg-zinc-800/50 rounded-lg p-2 text-center">
+          <div className="bg-muted/50 rounded-lg p-2 text-center">
             <div className="text-lg font-bold text-emerald-400">{empRate}%</div>
             <div className="text-[9px] text-zinc-500">Employment</div>
             <Delta local={`${empRate}%`} national={empRateEng} />
           </div>
-          <div className="bg-zinc-800/50 rounded-lg p-2 text-center">
+          <div className="bg-muted/50 rounded-lg p-2 text-center">
             <div className="text-lg font-bold text-red-400">{unempRate}%</div>
             <div className="text-[9px] text-zinc-500">Unemployment</div>
             <Delta local={`${unempRate}%`} national={unempRateEng} invert />
           </div>
-          <div className="bg-zinc-800/50 rounded-lg p-2 text-center">
+          <div className="bg-muted/50 rounded-lg p-2 text-center">
             <div className="text-lg font-bold text-zinc-200">{medianPay}</div>
             <div className="text-[9px] text-zinc-500">Median Weekly Pay</div>
             <Delta local={medianPay} national={medianPayEng} />
@@ -287,9 +303,9 @@ export default function CommonsLibraryPanel() {
       </div>
 
       {/* ── Housing ── */}
-      <div className="bg-zinc-900 rounded-xl p-4">
+      <div className="bg-muted rounded-xl p-4">
         <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-3 font-medium">
-          🏠 Housing Tenure
+          Housing Tenure
         </div>
         <div className="space-y-2">
           <div className="flex items-center gap-1">
@@ -302,17 +318,17 @@ export default function CommonsLibraryPanel() {
       </div>
 
       {/* ── Health ── */}
-      <div className="bg-zinc-900 rounded-xl p-4">
+      <div className="bg-muted rounded-xl p-4">
         <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-3 font-medium">
-          ❤️ Health & Wellbeing
+          Health & Wellbeing
         </div>
         <div className="grid grid-cols-2 gap-3 mb-3">
-          <div className="bg-zinc-800/50 rounded-lg p-2 text-center">
+          <div className="bg-muted/50 rounded-lg p-2 text-center">
             <div className="text-base font-bold text-blue-400">{lifeExpM}</div>
             <div className="text-[9px] text-zinc-500">Life Exp. (Male)</div>
             <Delta local={lifeExpM} national={lifeExpMEng} />
           </div>
-          <div className="bg-zinc-800/50 rounded-lg p-2 text-center">
+          <div className="bg-muted/50 rounded-lg p-2 text-center">
             <div className="text-base font-bold text-pink-400">{lifeExpF}</div>
             <div className="text-[9px] text-zinc-500">Life Exp. (Female)</div>
             <Delta local={lifeExpF} national={lifeExpFEng} />
@@ -325,9 +341,9 @@ export default function CommonsLibraryPanel() {
       </div>
 
       {/* ── Education ── */}
-      <div className="bg-zinc-900 rounded-xl p-4">
+      <div className="bg-muted rounded-xl p-4">
         <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-3 font-medium">
-          🎓 Education
+          Education
         </div>
         <div className="space-y-2">
           <div className="flex items-center gap-1">
@@ -340,21 +356,21 @@ export default function CommonsLibraryPanel() {
       </div>
 
       {/* ── Deprivation ── */}
-      <div className="bg-zinc-900 rounded-xl p-4">
+      <div className="bg-muted rounded-xl p-4">
         <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-3 font-medium">
-          📊 Deprivation
+          Deprivation
         </div>
         <div className="grid grid-cols-3 gap-3">
-          <div className="bg-zinc-800/50 rounded-lg p-2 text-center">
+          <div className="bg-muted/50 rounded-lg p-2 text-center">
             <div className="text-base font-bold text-orange-400">{imdRank}</div>
             <div className="text-[9px] text-zinc-500">IMD Rank (of 650)</div>
           </div>
-          <div className="bg-zinc-800/50 rounded-lg p-2 text-center">
+          <div className="bg-muted/50 rounded-lg p-2 text-center">
             <div className="text-base font-bold text-orange-400">{fuelPov}</div>
             <div className="text-[9px] text-zinc-500">Fuel Poverty</div>
             <Delta local={fuelPov} national={fuelPovEng} invert />
           </div>
-          <div className="bg-zinc-800/50 rounded-lg p-2 text-center">
+          <div className="bg-muted/50 rounded-lg p-2 text-center">
             <div className="text-base font-bold text-orange-400">{childPov}</div>
             <div className="text-[9px] text-zinc-500">Child Poverty</div>
             <Delta local={childPov} national={childPovEng} invert />
@@ -363,9 +379,9 @@ export default function CommonsLibraryPanel() {
       </div>
 
       {/* ── Transport ── */}
-      <div className="bg-zinc-900 rounded-xl p-4">
+      <div className="bg-muted rounded-xl p-4">
         <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-3 font-medium">
-          🚌 Transport & Digital
+          Transport & Digital
         </div>
         <div className="space-y-2">
           {carOwn && <MiniBar label="Car ownership (1+ car)" value={carOwn} color="#22d3ee" />}
@@ -375,9 +391,9 @@ export default function CommonsLibraryPanel() {
       </div>
 
       {/* ── Demographics ── */}
-      <div className="bg-zinc-900 rounded-xl p-4">
+      <div className="bg-muted rounded-xl p-4">
         <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-3 font-medium">
-          👥 Demographics
+          Demographics
         </div>
         <div className="space-y-2">
           <div className="flex items-center gap-1">

@@ -3,10 +3,29 @@
 @tailwind utilities;
 
 :root {
+  --background: #ffffff;
+  --foreground: #0a0a0a;
+  --card: #f9f9f9;
+  --card-foreground: #0a0a0a;
+  --muted: #f1f1f1;
+  --muted-foreground: #6b7280;
+  --border: #e5e7eb;
+  --primary: #1d4ed8;
+  --primary-foreground: #ffffff;
+  --accent: #065f46;
+  --accent-bright: #10b981;
+}
+
+.dark {
   --background: #0a0a0a;
   --foreground: #e4e4e7;
-  --panel-bg: #141414;
-  --panel-border: #2a2a2a;
+  --card: #141414;
+  --card-foreground: #e4e4e7;
+  --muted: #1a1a1a;
+  --muted-foreground: #71717a;
+  --border: #2a2a2a;
+  --primary: #3b82f6;
+  --primary-foreground: #ffffff;
   --accent: #0f5040;
   --accent-bright: #10b981;
 }
@@ -17,11 +36,11 @@ body {
   font-family: 'SF Mono', 'Monaco', 'Cascadia Code', 'Fira Code', 'DejaVu Sans Mono', 'Liberation Mono', ui-monospace, monospace;
 }
 
-/* MapLibre overrides for dark theme */
+/* MapLibre overrides */
 .maplibregl-popup-content {
-  background: #141414 !important;
-  color: #e4e4e7 !important;
-  border: 1px solid #2a2a2a !important;
+  background: var(--card) !important;
+  color: var(--foreground) !important;
+  border: 1px solid var(--border) !important;
   border-radius: 2px !important;
   padding: 8px 12px !important;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5) !important;
@@ -30,25 +49,25 @@ body {
 }
 
 .maplibregl-popup-tip {
-  border-top-color: #141414 !important;
+  border-top-color: var(--card) !important;
 }
 
 .maplibregl-popup-close-button {
-  color: #71717a !important;
+  color: var(--muted-foreground) !important;
   font-size: 16px !important;
 }
 
 .maplibregl-ctrl-group {
-  background: #141414 !important;
-  border: 1px solid #2a2a2a !important;
+  background: var(--card) !important;
+  border: 1px solid var(--border) !important;
   border-radius: 2px !important;
 }
 
 .maplibregl-ctrl-group button {
-  border-color: #2a2a2a !important;
+  border-color: var(--border) !important;
 }
 
-.maplibregl-ctrl-group button span {
+.dark .maplibregl-ctrl-group button span {
   filter: invert(1) !important;
 }
 
@@ -62,12 +81,22 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #2a2a2a;
+  background: var(--border);
   border-radius: 2px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #3f3f46;
+  background: var(--muted-foreground);
+}
+
+/* Light mode: zinc shades designed for dark backgrounds are too light on white */
+html:not(.dark) .text-zinc-100,
+html:not(.dark) .text-zinc-200,
+html:not(.dark) .text-zinc-300 {
+  color: #111827;
+}
+html:not(.dark) .text-zinc-400 {
+  color: #374151;
 }
 
 /* Line clamp utility */
@@ -85,7 +114,7 @@ body {
 }
 
 .animate-shimmer {
-  background: linear-gradient(90deg, #141414 25%, #1a1a1a 50%, #141414 75%);
+  background: linear-gradient(90deg, var(--muted) 25%, var(--card) 50%, var(--muted) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
 }

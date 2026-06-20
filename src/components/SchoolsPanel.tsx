@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { GraduationCap, ExternalLink, Users, School } from "lucide-react";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 interface SchoolItem {
   name: string;
@@ -42,6 +43,7 @@ const TYPE_GROUPS: { key: SchoolItem["type"]; label: string; icon: string }[] = 
 ];
 
 export default function SchoolsPanel() {
+  const { slug } = useConstituency();
   const [schools, setSchools] = useState<SchoolItem[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -49,12 +51,13 @@ export default function SchoolsPanel() {
 
   useEffect(() => {
     fetchSchools();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
 
   async function fetchSchools() {
     try {
       setLoading(true);
-      const res = await fetch("/api/schools");
+      const res = await fetch(withConstituency("/api/schools", slug));
       if (!res.ok) throw new Error("Failed");
       const data = await res.json();
       setSchools(data.schools || []);
@@ -72,8 +75,8 @@ export default function SchoolsPanel() {
       <div className="p-4 space-y-3">
         {[...Array(5)].map((_, i) => (
           <div key={i} className="animate-pulse space-y-2">
-            <div className="h-3 bg-zinc-800 rounded w-4/5" />
-            <div className="h-2.5 bg-zinc-800/50 rounded w-2/5" />
+            <div className="h-3 bg-muted rounded w-4/5" />
+            <div className="h-2.5 bg-muted/50 rounded w-2/5" />
           </div>
         ))}
       </div>
@@ -93,7 +96,7 @@ export default function SchoolsPanel() {
   return (
     <div>
       {/* Summary stats */}
-      <div className="px-3 py-2.5 border-b border-zinc-800/50">
+      <div className="px-3 py-2.5 border-b border-border/50">
         <div className="grid grid-cols-3 gap-2 mb-2.5">
           <div className="text-center">
             <div className="text-lg font-bold text-zinc-200">{summary.total}</div>
@@ -115,7 +118,7 @@ export default function SchoolsPanel() {
             <div className="flex items-center gap-1.5 mb-1">
               <span className="text-[10px] text-zinc-500 font-medium">Ofsted Ratings</span>
             </div>
-            <div className="flex h-2 rounded-full overflow-hidden bg-zinc-800">
+            <div className="flex h-2 rounded-full overflow-hidden bg-muted">
               {summary.outstanding > 0 && (
                 <div
                   className="bg-emerald-500 transition-all"
@@ -190,7 +193,7 @@ export default function SchoolsPanel() {
             <div key={group.key}>
               <button
                 onClick={() => setExpandedType(isExpanded ? null : group.key)}
-                className="w-full flex items-center justify-between px-3 py-2 hover:bg-zinc-800/20 transition-colors"
+                className="w-full flex items-center justify-between px-3 py-2 hover:bg-muted/20 transition-colors"
               >
                 <div className="flex items-center gap-2">
                   <div className={`h-2 w-2 rounded-full border ${group.icon}`} />
@@ -211,10 +214,10 @@ export default function SchoolsPanel() {
                         href={`https://www.google.com/search?q=${encodeURIComponent(school.name + " " + school.address + " Ofsted")}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="block px-3 py-1.5 hover:bg-zinc-800/20 transition-colors group mx-1"
+                        className="block px-3 py-1.5 hover:bg-muted/20 transition-colors group mx-1"
                       >
                         <div className="flex items-start gap-2">
-                          <div className="mt-0.5 p-1 rounded bg-zinc-800/50">
+                          <div className="mt-0.5 p-1 rounded bg-muted/50">
                             {school.type === "Secondary" ? (
                               <GraduationCap className="h-3 w-3 text-purple-400" />
                             ) : school.type === "Special" ? (
@@ -253,7 +256,7 @@ export default function SchoolsPanel() {
       </div>
 
       {/* Footer */}
-      <div className="px-3 py-2 border-t border-zinc-800/50 text-center">
+      <div className="px-3 py-2 border-t border-border/50 text-center">
         <span className="text-[10px] text-zinc-600">
           {summary.total} schools in constituency · DfE GIAS
         </span>

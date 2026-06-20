@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ExternalLink, Bookmark } from "lucide-react";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 interface HeadlineItem {
   title: string;
@@ -26,6 +27,7 @@ function getSourceStyle(source: string) {
 }
 
 export default function Headlines() {
+  const { slug } = useConstituency();
   const [headlines, setHeadlines] = useState<HeadlineItem[]>([]);
   const [briefings, setBriefings] = useState<HeadlineItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -35,7 +37,7 @@ export default function Headlines() {
     async function fetchHeadlines() {
       setLoading(true);
       try {
-        const res = await fetch("/api/headlines");
+        const res = await fetch(withConstituency("/api/headlines", slug));
         if (!res.ok) throw new Error("Failed");
         const data = await res.json();
         setHeadlines(data.headlines || []);
@@ -47,7 +49,8 @@ export default function Headlines() {
       }
     }
     fetchHeadlines();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
 
   if (loading) {
     return (
@@ -55,8 +58,8 @@ export default function Headlines() {
         {[...Array(6)].map((_, i) => (
           <div key={i} className="animate-pulse space-y-2">
             <div className="flex items-center gap-2">
-              <div className="h-4 w-14 bg-zinc-800 rounded" />
-              <div className="h-3.5 bg-zinc-800 rounded w-3/4" />
+              <div className="h-4 w-14 bg-muted rounded" />
+              <div className="h-3.5 bg-muted rounded w-3/4" />
             </div>
           </div>
         ))}
@@ -67,7 +70,7 @@ export default function Headlines() {
   return (
     <div>
       {/* Tabs */}
-      <div className="flex border-b border-zinc-800">
+      <div className="flex border-b border-border">
         <button
           onClick={() => setTab("headlines")}
           className={`flex-1 px-3 py-1.5 text-xs font-medium transition-colors ${
@@ -101,7 +104,7 @@ export default function Headlines() {
                 href={item.link}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="block px-4 py-2.5 hover:bg-zinc-800/30 transition-colors group"
+                className="block px-4 py-2.5 hover:bg-muted/30 transition-colors group"
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 min-w-0">
@@ -141,7 +144,7 @@ export default function Headlines() {
                   href={item.link}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="block px-4 py-3 hover:bg-zinc-800/30 transition-colors group"
+                  className="block px-4 py-3 hover:bg-muted/30 transition-colors group"
                 >
                   <div className="flex items-center gap-2 mb-1.5">
                     <Bookmark className="h-3 w-3 text-orange-400" />
@@ -174,7 +177,7 @@ export default function Headlines() {
         </div>
       )}
 
-      <div className="px-3 py-2 text-[10px] text-zinc-700 text-center border-t border-zinc-800/50">
+      <div className="px-3 py-2 text-[10px] text-zinc-700 text-center border-t border-border/50">
         BBC, Sky, Guardian, Telegraph, GB News, Politico &middot; Updates every 10 min
       </div>
     </div>

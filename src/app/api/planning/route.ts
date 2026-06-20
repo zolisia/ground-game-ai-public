@@ -1,16 +1,34 @@
 import { NextResponse } from "next/server";
+import type { DocumentReference } from "firebase-admin/firestore";
 import { isInsideConstituency } from "@/lib/geo";
+import { adminDb } from "@/lib/firebase-admin";
+import { getFullData } from "@/data";
 
-// Force dynamic — fetches live external data
 export const dynamic = "force-dynamic";
 
-// PlanIt API for planning applications in the Braintree constituency area
-// Free API, no auth required
-// Bounding box covers the FULL parliamentary constituency with padding:
-// Extends south to ~51.75 (Tiptree, Wickham Bishops) and west to ~0.30
+// PlanIt API for planning applications — free, no auth.
+// Per request, sends a bounding box for the requested constituency, then
+// filters results via isInsideConstituency() to drop anything outside the
+// actual polygon.
 
-const PLANIT_URL =
-  "https://www.planit.org.uk/api/applics/json?bbox=0.30,51.75,0.79,52.09&recent=60&limit=100";
+const PLANIT_BASE = "https://www.planit.org.uk/api/applics/json";
+
+// Braintree-only curated bbox. Slightly padded vs. the actual extent
+// (extends south to ~51.75 to catch Tiptree/Wickham Bishops, west to ~0.30).
+// Used when slug === "braintree" to preserve the existing coverage.
+// For other constituencies, the data layer's `geo.bbox` is formatted to
+// match PlanIt's expected lng,lat,lng,lat string.
+const BRAINTREE_BBOX = "0.30,51.75,0.79,52.09";
+
+function buildPlanItUrl(bbox: string): string {
+  return `${PLANIT_BASE}?bbox=${bbox}&recent=60&limit=100`;
+}
+
+function bboxArrayToString(bbox: [number, number, number, number]): string {
+  return bbox.map((n) => n.toFixed(4)).join(",");
+}
+
+const TTL_MS = 60 * 60 * 1000;
 
 interface PlanItRecord {
   uid?: string;
@@ -49,9 +67,17 @@ interface NormalisedApplication {
   local_authority: string;
 }
 
-export async function GET() {
+interface PlanningData {
+  applications: NormalisedApplication[];
+  total: number;
+}
+
+async function generateFreshData(
+  bbox: string,
+  constituencySlug: string
+): Promise<PlanningData | null> {
   try {
-    const res = await fetch(PLANIT_URL, {
+    const res = await fetch(buildPlanItUrl(bbox), {
       next: { revalidate: 86400 },
       headers: {
         "User-Agent": "Mozilla/5.0 (compatible; GroundGameAI/1.0)",
@@ -60,14 +86,14 @@ export async function GET() {
     });
 
     if (!res.ok) {
-      return NextResponse.json({ applications: [], total: 0 });
+      return { applications: [], total: 0 };
     }
 
     const data: PlanItResponse = await res.json();
     const records = data.records || [];
 
     if (records.length === 0) {
-      return NextResponse.json({ applications: [], total: 0 });
+      return { applications: [], total: 0 };
     }
 
     const applications: NormalisedApplication[] = records
@@ -85,12 +111,110 @@ export async function GET() {
         local_authority: record.area_name || record.authority_name || "",
       }))
       .filter((app) => app.lat !== 0 && app.lng !== 0)
-      .filter((app) => isInsideConstituency(app.lng, app.lat));
+      .filter((app) => isInsideConstituency(app.lng, app.lat, constituencySlug));
 
-    return NextResponse.json({ applications, total: applications.length });
-  } catch {
+    return { applications, total: applications.length };
+  } catch (err) {
+    console.error("Planning data fetch failed:", err);
+    return null;
+  }
+}
+
+async function fetchAndUpdateCache(
+  bbox: string,
+  constituencySlug: string,
+  cacheDocRef: DocumentReference
+) {
+  try {
+    const fresh = await generateFreshData(bbox, constituencySlug);
+    if (!fresh) return;
+
+    const existing = await cacheDocRef.get();
+    const existingData = existing.data()?.data ?? null;
+
+    if (existingData && JSON.stringify(existingData) === JSON.stringify(fresh)) {
+      return;
+    }
+
+    await cacheDocRef.set({
+      data: fresh,
+      updated_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("Background planning cache update failed:", err);
+  }
+}
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const constituencySlug = searchParams.get("constituency") || "braintree";
+  const force = searchParams.get("force") === "1";
+  const constituencyData = getFullData(constituencySlug);
+
+  if (!constituencyData) {
+    return Response.json(
+      { error: "Invalid constituency slug" },
+      { status: 400 }
+    );
+  }
+
+  // Determine bbox: curated Braintree fallback, else format constituency.geo.bbox
+  // to PlanIt's lng,lat,lng,lat string. ~107 non-English constituencies have
+  // no geo data populated — return a clean 400 for those.
+  let bbox: string;
+  if (constituencySlug === "braintree") {
+    bbox = BRAINTREE_BBOX;
+  } else if (constituencyData.geo?.bbox) {
+    bbox = bboxArrayToString(constituencyData.geo.bbox);
+  } else {
+    return Response.json(
+      {
+        error: "Planning data not available",
+        message: "Geographic bbox not yet sourced for this constituency",
+        constituency: constituencySlug,
+      },
+      { status: 400 }
+    );
+  }
+
+  const cacheDocRef = adminDb.collection("planning_cache").doc(constituencySlug);
+
+  type CacheDoc = { data: { applications: unknown[]; total: number }; updated_at: string };
+  let cached: CacheDoc | null = null;
+  try {
+    const snap = await cacheDocRef.get();
+    if (snap.exists) {
+      cached = snap.data() as CacheDoc;
+    }
+  } catch (err) {
+    console.warn("Planning cache read failed (continuing without cache):", err);
+  }
+
+  if (cached && !force) {
+    const cacheAge = Date.now() - new Date(cached.updated_at).getTime();
+    if (cacheAge > TTL_MS) {
+      fetchAndUpdateCache(bbox, constituencySlug, cacheDocRef)
+        .catch(err => console.warn("Planning background refresh failed:", err));
+    }
+    return NextResponse.json({ ...cached.data, source: "cache", _cachedAt: new Date(cached.updated_at).getTime() });
+  }
+
+  const fresh = await generateFreshData(bbox, constituencySlug);
+  if (!fresh) {
     return NextResponse.json({ applications: [], total: 0 });
   }
+
+  const cachedAt = Date.now();
+  try {
+    await cacheDocRef.set({
+      data: fresh,
+      updated_at: new Date(cachedAt).toISOString(),
+    });
+  } catch (err) {
+    console.warn("Planning cache write failed (returning fresh anyway):", err);
+  }
+
+  return NextResponse.json({ ...fresh, _cachedAt: cachedAt });
 }
 
 function categoriseApplication(description: string): string {

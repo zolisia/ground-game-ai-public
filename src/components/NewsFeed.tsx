@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ExternalLink } from "lucide-react";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 interface NewsItem {
   title: string;
@@ -12,6 +13,7 @@ interface NewsItem {
 }
 
 export default function NewsFeed() {
+  const { slug } = useConstituency();
   const [items, setItems] = useState<NewsItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -20,7 +22,7 @@ export default function NewsFeed() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/news");
+      const res = await fetch(withConstituency("/api/news", slug));
       if (!res.ok) throw new Error("Failed to fetch news");
       const data = await res.json();
       setItems(data.items || []);
@@ -35,15 +37,16 @@ export default function NewsFeed() {
 
   useEffect(() => {
     fetchNews();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
 
   if (loading) {
     return (
       <div className="p-4 space-y-3">
         {[...Array(5)].map((_, i) => (
           <div key={i} className="animate-pulse space-y-2">
-            <div className="h-3.5 bg-zinc-800 rounded w-3/4" />
-            <div className="h-2.5 bg-zinc-800/50 rounded w-1/2" />
+            <div className="h-3.5 bg-muted rounded w-3/4" />
+            <div className="h-2.5 bg-muted/50 rounded w-1/2" />
           </div>
         ))}
       </div>
@@ -64,7 +67,7 @@ export default function NewsFeed() {
             href={item.link}
             target="_blank"
             rel="noopener noreferrer"
-            className="block px-4 py-3 hover:bg-zinc-800/30 transition-colors group"
+            className="block px-4 py-3 hover:bg-muted/30 transition-colors group"
           >
             <div className="flex items-start justify-between gap-2">
               <div className="flex-1 min-w-0">

@@ -1,18 +1,20 @@
 import { NextResponse } from "next/server";
+import { adminDb } from "@/lib/firebase-admin";
+import { getFullData } from "@/data";
 
-// Force dynamic — fetches live external data
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
-// Care Quality Commission (CQC) Public API — no auth required
+// Care Quality Commission (CQC) Public API — no auth required.
 // Docs: https://api.cqc.org.uk/public/v1
-// partnerCode is an optional identifier for tracking
+// partnerCode is an optional identifier for tracking (not per-constituency).
+
+const TTL_MS = 7 * 24 * 60 * 60 * 1000; // CQC inspection cycle is months–years — weekly refresh is enough
 
 const CQC_BASE = "https://api.cqc.org.uk/public/v1";
 const PARTNER_CODE = "GroundGame";
 
-// Postcodes covering Braintree constituency
-const POSTCODES = ["CM7", "CM77", "CO9"];
+const BRAINTREE_POSTCODES = ["CM7", "CM77", "CO9"];
 
 const MAX_DETAIL_FETCHES = 15;
 
@@ -51,6 +53,16 @@ interface LocationResult {
   cqcUrl: string;
 }
 
+interface CQCData {
+  locations: LocationResult[];
+  summary: { outstanding: number; good: number; requiresImprovement: number; inadequate: number };
+  totalFound: number;
+  detailsFetched: number;
+  source: string;
+  sourceUrl: string;
+  note?: string;
+}
+
 async function fetchLocationsForPostcode(postcode: string): Promise<CQCLocationSummary[]> {
   try {
     const res = await fetch(
@@ -78,11 +90,14 @@ async function fetchLocationDetail(locationId: string): Promise<CQCLocationDetai
   }
 }
 
-export async function GET() {
+async function generateFreshData(
+  postcodes: string[],
+  constituencySlug: string
+): Promise<CQCData> {
   try {
     // Fetch location lists for all postcodes in parallel
     const listResults = await Promise.allSettled(
-      POSTCODES.map((pc) => fetchLocationsForPostcode(pc))
+      postcodes.map((pc) => fetchLocationsForPostcode(pc))
     );
 
     // De-duplicate locations by ID
@@ -139,21 +154,97 @@ export async function GET() {
       else if (ratingLower === "inadequate") ratingCounts.inadequate++;
     }
 
-    // If API returned no results (403 / blocked), use fallback
+    // If API returned no results (403 / blocked), use fallback (Braintree-only;
+    // empty for other constituencies — see getFallbackData).
     if (locations.length === 0) {
-      return NextResponse.json(getFallbackData());
+      return getFallbackData(constituencySlug);
     }
 
-    return NextResponse.json({
+    return {
       locations,
       summary: ratingCounts,
       totalFound: allLocations.length,
       detailsFetched: toFetch.length,
       source: "live",
       sourceUrl: "https://www.cqc.org.uk/",
-    });
+    };
   } catch {
-    return NextResponse.json(getFallbackData());
+    return getFallbackData(constituencySlug);
+  }
+}
+
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const constituencySlug = searchParams.get("constituency") || "braintree";
+  const force = searchParams.get("force") === "1";
+  const constituencyData = getFullData(constituencySlug);
+
+  if (!constituencyData) {
+    return Response.json(
+      { error: "Invalid constituency slug" },
+      { status: 400 }
+    );
+  }
+
+  // Determine postcodes: Braintree fallback, else try the (forward-compatible)
+  const postcodes = constituencyData.areas?.postcodes ?? (constituencySlug === "braintree" ? BRAINTREE_POSTCODES : null);
+
+  if (!postcodes) {
+    return Response.json(
+      {
+        error: "CQC data not available",
+        message: "Postcode data not yet sourced for this constituency",
+        constituency: constituencySlug,
+      },
+      { status: 400 }
+    );
+  }
+
+  const cacheDocRef = adminDb.collection("cqc_cache").doc(constituencySlug);
+
+  type CacheDoc = { data: Record<string, unknown>; updated_at: string };
+  let cached: CacheDoc | null = null;
+  try {
+    const snap = await cacheDocRef.get();
+    if (snap.exists) {
+      cached = snap.data() as CacheDoc;
+    }
+  } catch (err) {
+    console.warn("CQC cache read failed (continuing without cache):", err);
+  }
+
+  if (cached && !force) {
+    const cacheAge = Date.now() - new Date(cached.updated_at).getTime();
+    if (cacheAge > TTL_MS) {
+      (async () => {
+        try {
+          const fresh = await generateFreshData(postcodes, constituencySlug);
+          await cacheDocRef.set({ data: fresh, updated_at: new Date().toISOString() });
+        } catch (err) {
+          console.warn("CQC background refresh failed:", err);
+        }
+      })();
+    }
+    return NextResponse.json({ ...cached.data, source: "cache", _cachedAt: new Date(cached.updated_at).getTime() });
+  }
+
+  try {
+    const fresh = await generateFreshData(postcodes, constituencySlug);
+
+    const cachedAt = Date.now();
+    try {
+      await cacheDocRef.set({
+        data: fresh,
+        updated_at: new Date(cachedAt).toISOString(),
+      });
+    } catch (err) {
+      console.warn("CQC cache write failed (returning fresh anyway):", err);
+    }
+
+    return NextResponse.json({ ...fresh, _cachedAt: cachedAt });
+  } catch {
+    return NextResponse.json(getFallbackData(constituencySlug));
   }
 }
 
@@ -163,7 +254,23 @@ function cqcSearch(name: string): string {
   return `https://www.google.com/search?q=${encodeURIComponent(name + " CQC inspection report")}`;
 }
 
-function getFallbackData() {
+function getFallbackData(constituencySlug: string): CQCData {
+  // The hardcoded fallback list below is the Braintree-area care directory.
+  // For any other constituency, return an empty result rather than mislabel
+  // Braintree facilities as theirs. Per-constituency directories would need
+  // to be sourced before lifting this.
+  if (constituencySlug !== "braintree") {
+    return {
+      locations: [],
+      summary: { outstanding: 0, good: 0, requiresImprovement: 0, inadequate: 0 },
+      totalFound: 0,
+      detailsFetched: 0,
+      source: "fallback",
+      sourceUrl: "https://www.cqc.org.uk/",
+      note: "CQC fallback directory not yet sourced for this constituency.",
+    };
+  }
+
   const locations: LocationResult[] = [
     { name: "Braintree Community Hospital", type: "Hospital", rating: "Good", lastInspection: "2024-06-15", beds: 30, postcode: "CM7 1TG", reportUrl: null, cqcUrl: cqcSearch("Braintree Community Hospital") },
     { name: "Highwood House Care Home", type: "Care home", rating: "Good", lastInspection: "2024-03-22", beds: 40, postcode: "CM7 5LJ", reportUrl: null, cqcUrl: cqcSearch("Highwood House") },

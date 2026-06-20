@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 interface IndexItem {
   period: string;
@@ -56,25 +57,26 @@ function formatDate(d: string): string {
 }
 
 export default function HousePricesPanel() {
+  const { slug } = useConstituency();
   const [data, setData] = useState<HousePriceData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/house-prices")
+    fetch(withConstituency("/api/house-prices", slug))
       .then((res) => res.json())
       .then((d: HousePriceData) => setData(d))
       .catch(() => setData(null))
       .finally(() => setLoading(false));
-  }, []);
+  }, [slug]);
 
   if (loading) {
     return (
-      <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 animate-pulse">
-        <div className="h-4 bg-zinc-800 rounded w-40 mb-4" />
-        <div className="h-16 bg-zinc-900 rounded-xl mb-3" />
+      <div className="bg-background border border-border rounded-2xl p-4 animate-pulse">
+        <div className="h-4 bg-muted rounded w-40 mb-4" />
+        <div className="h-16 bg-muted rounded-xl mb-3" />
         <div className="space-y-2">
           {[...Array(4)].map((_, i) => (
-            <div key={i} className="h-10 bg-zinc-900 rounded-xl" />
+            <div key={i} className="h-10 bg-muted rounded-xl" />
           ))}
         </div>
       </div>
@@ -83,7 +85,7 @@ export default function HousePricesPanel() {
 
   if (!data || data.error) {
     return (
-      <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4">
+      <div className="bg-background border border-border rounded-2xl p-4">
         <p className="text-zinc-500 text-xs">House price data unavailable</p>
       </div>
     );
@@ -124,7 +126,7 @@ export default function HousePricesPanel() {
   const priceMax = allPrices.length > 0 ? Math.max(...allPrices) : 0;
 
   return (
-    <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 space-y-4">
+    <div className="bg-background border border-border rounded-2xl p-4 space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-zinc-200">House Prices</h3>
@@ -140,7 +142,7 @@ export default function HousePricesPanel() {
 
       {/* Headline — average price */}
       {latest && (
-        <div className="bg-zinc-900 rounded-xl p-3 flex items-center justify-between">
+        <div className="bg-muted rounded-xl p-3 flex items-center justify-between">
           <div>
             <div className="text-[10px] text-zinc-500 uppercase tracking-wider">
               Average Price
@@ -182,7 +184,7 @@ export default function HousePricesPanel() {
           <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2">
             By Property Type
           </div>
-          <div className="bg-zinc-900 rounded-xl p-3 space-y-2">
+          <div className="bg-muted rounded-xl p-3 space-y-2">
             {typeEntries.map(([label, stats]) => (
               <div key={label} className="flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2 min-w-0">
@@ -204,7 +206,7 @@ export default function HousePricesPanel() {
       )}
 
       {allPrices.length > 0 && (
-        <div className="bg-zinc-900 rounded-xl p-3 flex items-center justify-between">
+        <div className="bg-muted rounded-xl p-3 flex items-center justify-between">
           <div>
             <div className="text-[10px] text-zinc-500 uppercase tracking-wider">
               Price Range
@@ -236,7 +238,7 @@ export default function HousePricesPanel() {
               return (
                 <div
                   key={i}
-                  className="bg-zinc-900 rounded-xl px-3 py-2 flex items-center justify-between gap-2"
+                  className="bg-muted rounded-xl px-3 py-2 flex items-center justify-between gap-2"
                 >
                   <div className="min-w-0 flex-1">
                     <div className="text-xs text-zinc-200 truncate">

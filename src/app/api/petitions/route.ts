@@ -1,19 +1,17 @@
 import { NextResponse } from "next/server";
+import { getFullData } from "@/data";
 
 // Force dynamic — fetches live external data
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 // UK Parliament Petitions API — free, no auth required
-// Fetches open e-petitions and calculates constituency salience for Braintree
+// Fetches open e-petitions and calculates constituency salience.
 // Docs: https://petition.parliament.uk/help
 
 const PETITIONS_API = "https://petition.parliament.uk/petitions.json";
 const PETITION_DETAIL = "https://petition.parliament.uk/petitions";
 
-// Braintree constituency
-const ONS_CODE = "E14001121";
-const CONSTITUENCY_POP = 74838;
 const UK_POP = 67000000;
 
 interface PetitionResult {
@@ -25,7 +23,21 @@ interface PetitionResult {
   overIndexed: boolean;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const constituencySlug = searchParams.get("constituency") || "braintree";
+  const constituencyData = getFullData(constituencySlug);
+
+  if (!constituencyData) {
+    return Response.json(
+      { error: "Invalid constituency slug" },
+      { status: 400 }
+    );
+  }
+
+  const ONS_CODE = constituencyData.constituency.onsCode;
+  const electorate = constituencyData.constituency.electorate;
+
   try {
     // Fetch the list of open petitions
     const listRes = await fetch(`${PETITIONS_API}?state=open&page=1`, {
@@ -65,7 +77,7 @@ export async function GET() {
         const detailData = await detailRes.json();
         const constituencies = detailData.data?.attributes?.signatures_by_constituency || [];
 
-        // Find Braintree
+        // Find this constituency
         const local = constituencies.find(
           (c: { ons_code: string }) => c.ons_code === ONS_CODE
         );
@@ -76,8 +88,11 @@ export async function GET() {
         const localSigs = local.signature_count;
 
         // Salience: (local_share_of_signatures) / (constituency_share_of_population)
+        // NOTE: numerator now uses electorate (from data layer), denominator
+        // still uses UK total population. Bases differ — see comment above
+        // UK_POP. Affects absolute values but not petition ranking order.
         const localShare = localSigs / totalSigs;
-        const popShare = CONSTITUENCY_POP / UK_POP;
+        const popShare = electorate / UK_POP;
         const salience = localShare / popShare;
 
         return {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 // Match the actual API response shape from /api/universal-credit
 interface UCData {
@@ -28,24 +29,25 @@ const AGE_COLORS = [
 ];
 
 export default function UniversalCreditPanel() {
+  const { slug } = useConstituency();
   const [data, setData] = useState<UCData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/universal-credit")
+    fetch(withConstituency("/api/universal-credit", slug))
       .then((res) => res.json())
       .then((d: UCData) => setData(d))
       .catch(() => setData(null))
       .finally(() => setLoading(false));
-  }, []);
+  }, [slug]);
 
   if (loading) {
     return (
       <div className="animate-pulse">
-        <div className="h-4 bg-zinc-800 rounded w-40 mb-4" />
-        <div className="h-16 bg-zinc-900 rounded-xl mb-3" />
-        <div className="h-24 bg-zinc-900 rounded-xl mb-3" />
-        <div className="h-20 bg-zinc-900 rounded-xl" />
+        <div className="h-4 bg-muted rounded w-40 mb-4" />
+        <div className="h-16 bg-muted rounded-xl mb-3" />
+        <div className="h-24 bg-muted rounded-xl mb-3" />
+        <div className="h-20 bg-muted rounded-xl" />
       </div>
     );
   }
@@ -79,7 +81,7 @@ export default function UniversalCreditPanel() {
   return (
     <div className="space-y-4">
       {/* Headline figures */}
-      <div className="bg-zinc-900 rounded-xl p-3 flex items-center justify-between">
+      <div className="bg-muted rounded-xl p-3 flex items-center justify-between">
         <div>
           <div className="text-[10px] text-zinc-500 uppercase tracking-wider">
             Claimant Count
@@ -113,7 +115,7 @@ export default function UniversalCreditPanel() {
           <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2">
             12-Month Trend
           </div>
-          <div className="bg-zinc-900 rounded-xl p-3">
+          <div className="bg-muted rounded-xl p-3">
             <svg
               viewBox={`0 0 ${trend.length * 10} 40`}
               className="w-full h-10"
@@ -149,7 +151,7 @@ export default function UniversalCreditPanel() {
           <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2">
             Age Breakdown
           </div>
-          <div className="bg-zinc-900 rounded-xl p-3">
+          <div className="bg-muted rounded-xl p-3">
             <div className="flex h-4 rounded-full overflow-hidden">
               {ageBreakdown.map((seg, i) => (
                 <div

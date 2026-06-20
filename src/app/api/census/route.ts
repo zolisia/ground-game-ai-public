@@ -1,17 +1,25 @@
 import { NextResponse } from "next/server";
+import type { DocumentReference } from "firebase-admin/firestore";
+import { adminDb } from "@/lib/firebase-admin";
+import { getFullData } from "@/data";
 
-// Force dynamic — fetches live external data
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 // ONS Census 2021 API — free, no auth required
 // https://api.beta.ons.gov.uk/v1
-// Fetches ward-level census data for all wards in the Braintree constituency
+// Fetches ward-level census data for the requested constituency.
+
+const TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 const ONS_API = "https://api.beta.ons.gov.uk/v1/population-types";
 
-// All 28 wards in the Braintree Parliamentary Constituency
+// Braintree-only fallback. Used when the data layer doesn't yet have ward data
+// for the requested constituency. See REFACTOR_AUDIT.md §5 (missing data) — the
+// ~107 non-English constituencies (Scotland/Wales/NI) have no wards populated.
+// All 28 wards in the Braintree Parliamentary Constituency:
 // 26 from Braintree District + 2 from Uttlesford District (Felsted & Stebbing, The Sampfords)
-const WARD_CODES = [
+const BRAINTREE_WARD_CODES = [
   "E05010365", "E05010366", "E05010367", "E05010368", "E05010369",
   "E05010370", "E05010371", "E05010372", "E05010374", "E05010378",
   "E05010379", "E05010380", "E05010382", "E05010383", "E05010384",
@@ -151,31 +159,33 @@ interface ONSResponse {
   total_observations: number;
 }
 
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const topicId = searchParams.get("topic") || "age-under16";
+interface WardData {
+  wardCode: string;
+  wardName: string;
+  value: number;
+  total: number;
+  primaryCount: number;
+  breakdown?: Record<string, number>;
+}
 
-  // If requesting the list of available topics
-  if (topicId === "list") {
-    return NextResponse.json({
-      topics: TOPICS.map(t => ({
-        id: t.id,
-        label: t.label,
-        primaryLabel: t.primaryLabel,
-      })),
-    });
-  }
+interface CensusData {
+  topic: { id: string; label: string; primaryLabel: string };
+  wards: WardData[];
+  summary: {
+    totalPopulation: number;
+    constituencyAverage: number;
+    highestWard: WardData;
+    lowestWard: WardData;
+  };
+  source: string;
+}
 
-  const topic = TOPICS.find(t => t.id === topicId);
-  if (!topic) {
-    return NextResponse.json({ error: "Unknown topic" }, { status: 400 });
-  }
-
+async function generateFreshData(topic: CensusTopic, wardCodes: string[]): Promise<CensusData | null> {
   try {
     // Fetch data for all wards in parallel
     // ONS API supports querying one ward at a time
     const wardResults = await Promise.allSettled(
-      WARD_CODES.map(async (wardCode) => {
+      wardCodes.map(async (wardCode) => {
         const url = `${ONS_API}/${topic.populationType}/census-observations?dimensions=wd,${topic.dimension}&area-type=wd,${wardCode}`;
         const res = await fetch(url, {
           next: { revalidate: 604800 }, // Cache 7 days — census data doesn't change
@@ -186,16 +196,6 @@ export async function GET(request: Request) {
         return { wardCode, observations: data.observations };
       })
     );
-
-    // Process results into ward-level percentages
-    interface WardData {
-      wardCode: string;
-      wardName: string;
-      value: number; // percentage for choropleth
-      total: number;
-      primaryCount: number;
-      breakdown?: Record<string, number>;
-    }
 
     const wardData: WardData[] = [];
 
@@ -221,22 +221,22 @@ export async function GET(request: Request) {
         breakdown[valueDim.option] = obs.observation;
 
         // Handle inverted topics (where we want 100% - primaryCategory%)
-        if (topicId === "ethnicity" || topicId === "country-born-uk") {
+        if (topic.id === "ethnicity" || topic.id === "country-born-uk") {
           // For these, primaryCategory is the majority — we want the inverse
           if (valueDim.option_id !== topic.primaryCategory) {
             primaryCount += obs.observation;
           }
-        } else if (topicId === "health-bad") {
+        } else if (topic.id === "health-bad") {
           // Combine "Bad" and "Very bad" health
           if (valueDim.option_id === "4" || valueDim.option_id === "5") {
             primaryCount += obs.observation;
           }
-        } else if (topicId === "tenure-owned") {
+        } else if (topic.id === "tenure-owned") {
           // Combine "Owned outright" and "Owned with mortgage"
           if (valueDim.option_id === "1" || valueDim.option_id === "2") {
             primaryCount += obs.observation;
           }
-        } else if (topicId === "deprivation") {
+        } else if (topic.id === "deprivation") {
           // Combine "Deprived in 3" and "Deprived in 4" dimensions
           if (valueDim.option_id === "4" || valueDim.option_id === "5") {
             primaryCount += obs.observation;
@@ -265,7 +265,7 @@ export async function GET(request: Request) {
     const totalPrimary = wardData.reduce((sum, w) => sum + w.primaryCount, 0);
     const avgPercentage = totalPop > 0 ? Math.round((totalPrimary / totalPop) * 1000) / 10 : 0;
 
-    return NextResponse.json({
+    return {
       topic: {
         id: topic.id,
         label: topic.label,
@@ -279,12 +279,145 @@ export async function GET(request: Request) {
         lowestWard: wardData.reduce((min, w) => w.value < min.value ? w : min, wardData[0]),
       },
       source: "ONS Census 2021",
-    });
+    };
   } catch (err) {
     console.error("Census API error:", err);
+    return null;
+  }
+}
+
+async function fetchAndUpdateCache(topic: CensusTopic, cacheDocRef: DocumentReference, wardCodes: string[]) {
+  try {
+    const fresh = await generateFreshData(topic, wardCodes);
+    if (!fresh) return;
+
+    const existing = await cacheDocRef.get();
+    const existingData = existing.data()?.data ?? null;
+
+    if (existingData && JSON.stringify(existingData) === JSON.stringify(fresh)) {
+      return;
+    }
+
+    await cacheDocRef.set({
+      data: fresh,
+      updated_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("Background census cache update failed:", err);
+  }
+}
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const topicId = searchParams.get("topic") || "age-under16";
+
+  // If requesting the list of available topics
+  if (topicId === "list") {
+    return NextResponse.json({
+      topics: TOPICS.map(t => ({
+        id: t.id,
+        label: t.label,
+        primaryLabel: t.primaryLabel,
+      })),
+    });
+  }
+
+  const topic = TOPICS.find(t => t.id === topicId);
+  if (!topic) {
+    return NextResponse.json({ error: "Unknown topic" }, { status: 400 });
+  }
+
+  // Multi-constituency lookup. Placed after the `?topic=list` and topic
+  // validation branches so the meta endpoint doesn't require a constituency.
+  const constituencySlug = searchParams.get("constituency") || "braintree";
+  const force = searchParams.get("force") === "1";
+  const constituencyData = getFullData(constituencySlug);
+
+  if (!constituencyData) {
+    return Response.json(
+      { error: "Invalid constituency slug" },
+      { status: 400 }
+    );
+  }
+
+  // Try data-layer ward codes, fall back to Braintree's hardcoded list.
+  // ~107 non-English constituencies (Scotland/Wales/NI) have no ward data in
+  // the layer today — return a clean 400 for those. Empty `wards: []` is
+  // treated the same as `wards: undefined`; without this, the route would
+  // proceed with zero wards and crash downstream on `wardData[0]` in reduce.
+  const wardCodesFromData = constituencyData.areas?.wards?.map(w => w.code);
+  const WARD_CODES =
+    wardCodesFromData && wardCodesFromData.length > 0
+      ? wardCodesFromData
+      : (constituencySlug === "braintree" ? BRAINTREE_WARD_CODES : null);
+
+  if (!WARD_CODES) {
+    return Response.json(
+      {
+        error: "Census data not available",
+        message: "Ward-level data not yet sourced for this constituency",
+        constituency: constituencySlug,
+      },
+      { status: 400 }
+    );
+  }
+
+  // ONS Census 2021 only covers England (E05…) and Wales (W05…). Scottish
+  // (S05…) and Northern Irish (N…) wards are valid GSS codes but produce
+  // empty ONS responses, which downstream becomes a generic 500. Reject at
+  // the gate instead.
+  if (!WARD_CODES.some(code => code.startsWith("E05") || code.startsWith("W05"))) {
+    return Response.json(
+      {
+        error: "Census data not available",
+        message: "ONS Census 2021 covers England & Wales only",
+        constituency: constituencySlug,
+      },
+      { status: 400 }
+    );
+  }
+
+  // One cache doc per (constituency, topic) so different choropleth selections
+  // don't overwrite each other and constituencies don't collide.
+  const cacheDocRef = adminDb.collection("census_cache").doc(`${constituencySlug}-${topicId}`);
+
+  type CacheDoc = { data: Record<string, unknown>; updated_at: string };
+  let cached: CacheDoc | null = null;
+  try {
+    const snap = await cacheDocRef.get();
+    if (snap.exists) {
+      cached = snap.data() as CacheDoc;
+    }
+  } catch (err) {
+    console.warn("Census cache read failed (continuing without cache):", err);
+  }
+
+  if (cached && !force) {
+    const cacheAge = Date.now() - new Date(cached.updated_at).getTime();
+    if (cacheAge > TTL_MS) {
+      fetchAndUpdateCache(topic, cacheDocRef, WARD_CODES)
+        .catch(err => console.warn("Census background refresh failed:", err));
+    }
+    return NextResponse.json({ ...cached.data, source: "cache", _cachedAt: new Date(cached.updated_at).getTime() });
+  }
+
+  const fresh = await generateFreshData(topic, WARD_CODES);
+  if (!fresh) {
     return NextResponse.json(
       { error: "Failed to fetch census data" },
       { status: 500 }
     );
   }
+
+  const cachedAt = Date.now();
+  try {
+    await cacheDocRef.set({
+      data: fresh,
+      updated_at: new Date(cachedAt).toISOString(),
+    });
+  } catch (err) {
+    console.warn("Census cache write failed (returning fresh anyway):", err);
+  }
+
+  return NextResponse.json({ ...fresh, _cachedAt: cachedAt });
 }

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getFullData } from "@/data";
 
 // Force dynamic — needs runtime env vars (APIFY_API_TOKEN)
 export const dynamic = "force-dynamic";
@@ -21,20 +22,38 @@ interface SocialMention {
   isVerified: boolean;
 }
 
-const MP_NAME = "James Cleverly";
-const MP_HANDLE = "JamesCleverly";
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const constituencySlug = searchParams.get("constituency") || "braintree";
+  const constituencyData = getFullData(constituencySlug);
 
-export async function GET() {
+  if (!constituencyData) {
+    return Response.json(
+      { error: "Invalid constituency slug" },
+      { status: 400 }
+    );
+  }
+
+  if (!constituencyData.mp) {
+    return Response.json(
+      { error: "MP data not available for this constituency" },
+      { status: 400 }
+    );
+  }
+
+  const MP_NAME = constituencyData.mp.name;
+  const MP_HANDLE = constituencyData.mp.twitter; // null for ~50% of MPs — search degrades to name-only
+
   const hasXToken = !!process.env.X_BEARER_TOKEN;
   const hasApifyToken = !!process.env.APIFY_API_TOKEN;
   const apifyTokenPrefix = process.env.APIFY_API_TOKEN?.substring(0, 8) || "none";
 
-  console.log(`[mentions] env check: X_BEARER_TOKEN=${hasXToken}, APIFY_API_TOKEN=${hasApifyToken} (prefix: ${apifyTokenPrefix}...)`);
+  console.log(`[mentions] env check: X_BEARER_TOKEN=${hasXToken}, APIFY_API_TOKEN=${hasApifyToken} (prefix: ${apifyTokenPrefix}...), constituency=${constituencySlug}, mp=${MP_NAME}, handle=${MP_HANDLE ?? "(none)"}`);
 
   // Try X API first
   if (process.env.X_BEARER_TOKEN) {
     try {
-      const mentions = await fetchFromXApi();
+      const mentions = await fetchFromXApi(MP_NAME, MP_HANDLE);
       if (mentions.length > 0) {
         return NextResponse.json({
           mentions,
@@ -51,7 +70,7 @@ export async function GET() {
   if (process.env.APIFY_API_TOKEN) {
     try {
       console.log("[mentions] Attempting Apify fetch...");
-      const mentions = await fetchFromApify();
+      const mentions = await fetchFromApify(MP_NAME, MP_HANDLE);
       console.log(`[mentions] Apify returned ${mentions.length} mentions`);
       if (mentions.length > 0) {
         return NextResponse.json({
@@ -87,8 +106,12 @@ export async function GET() {
   });
 }
 
-async function fetchFromXApi(): Promise<SocialMention[]> {
-  const query = encodeURIComponent(`@${MP_HANDLE} OR "${MP_NAME}" -is:retweet`);
+async function fetchFromXApi(mpName: string, mpHandle: string | null): Promise<SocialMention[]> {
+  // If MP has no Twitter handle, fall back to name-only search.
+  const queryString = mpHandle
+    ? `@${mpHandle} OR "${mpName}" -is:retweet`
+    : `"${mpName}" -is:retweet`;
+  const query = encodeURIComponent(queryString);
   const url = `https://api.x.com/2/tweets/search/recent?query=${query}&max_results=20&tweet.fields=created_at,public_metrics,author_id&expansions=author_id&user.fields=name,username,verified`;
 
   const res = await fetch(url, {
@@ -133,15 +156,21 @@ async function fetchFromXApi(): Promise<SocialMention[]> {
   });
 }
 
-async function fetchFromApify(): Promise<SocialMention[]> {
+async function fetchFromApify(mpName: string, mpHandle: string | null): Promise<SocialMention[]> {
   const token = process.env.APIFY_API_TOKEN;
+
+  // If MP has no Twitter handle, fall back to name-only search across all
+  // three actor schemas.
+  const combinedQuery = mpHandle ? `@${mpHandle} OR "${mpName}"` : `"${mpName}"`;
+  const searchTermsForQuacker = mpHandle ? [`@${mpHandle}`, mpName] : [mpName];
+  const searchTermsForApify = [combinedQuery];
 
   // Try multiple actor configurations — different actors have different input schemas
   const actorConfigs = [
     {
       actor: "quacker/twitter-scraper",
       input: {
-        searchTerms: [`@${MP_HANDLE}`, MP_NAME],
+        searchTerms: searchTermsForQuacker,
         maxTweets: 20,
         sort: "Latest",
       },
@@ -149,7 +178,7 @@ async function fetchFromApify(): Promise<SocialMention[]> {
     {
       actor: "apidojo/tweet-scraper",
       input: {
-        startUrls: [{ url: `https://x.com/search?q=${encodeURIComponent(`@${MP_HANDLE} OR "${MP_NAME}"`)}&src=typed_query&f=live` }],
+        startUrls: [{ url: `https://x.com/search?q=${encodeURIComponent(combinedQuery)}&src=typed_query&f=live` }],
         maxItems: 20,
         sort: "Latest",
       },
@@ -157,7 +186,7 @@ async function fetchFromApify(): Promise<SocialMention[]> {
     {
       actor: "apify/twitter-scraper",
       input: {
-        searchTerms: [`@${MP_HANDLE} OR "${MP_NAME}"`],
+        searchTerms: searchTermsForApify,
         maxTweets: 20,
         tweetLanguage: "en",
       },

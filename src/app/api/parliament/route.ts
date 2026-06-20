@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
+import { getFullData } from "@/data";
 
 // UK Parliament APIs — public, no auth required
 // Members API: https://members-api.parliament.uk
 // Bills API: https://bills-api.parliament.uk
-
-const MP_ID = 4366; // James Cleverly, Braintree
 
 interface VoteItem {
   value: {
@@ -35,12 +34,26 @@ interface ApiBill {
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
+
+  // Get constituency from query param, default to braintree
+  const constituencySlug = searchParams.get("constituency") || "braintree";
+  const constituencyData = getFullData(constituencySlug);
+
+  // Validate constituency exists (and has MP data populated)
+  if (!constituencyData || !constituencyData.mp) {
+    return Response.json(
+      { error: "Invalid constituency slug" },
+      { status: 400 }
+    );
+  }
+
+  const MP_ID = constituencyData.mp.memberId;
   const type = searchParams.get("type") || "votes"; // votes | bills
   const query = searchParams.get("q");
 
   try {
     if (type === "votes") {
-      return await getVotes();
+      return await getVotes(MP_ID);
     } else {
       return await getBills(query);
     }
@@ -49,8 +62,8 @@ export async function GET(request: Request) {
   }
 }
 
-async function getVotes() {
-  const url = `https://members-api.parliament.uk/api/Members/${MP_ID}/Voting?house=1&take=20`;
+async function getVotes(mpId: number) {
+  const url = `https://members-api.parliament.uk/api/Members/${mpId}/Voting?house=1&take=20`;
   const res = await fetch(url, {
     next: { revalidate: 1800 },
     headers: { Accept: "application/json" },

@@ -3,31 +3,70 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import { useTheme } from "next-themes";
 import { constituencyGeo, wardData, wardElectoralCalc as fallbackWardElectoralCalc } from "@/data/braintree";
 import { Layers, ChevronDown, ChevronUp } from "lucide-react";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
+import { getFullData, WARD_DEPRIVATION } from "@/data";
 
 // Layer definitions — World Monitor style
 interface LayerDef {
   id: string;
   label: string;
-  emoji: string;
   description: string;
   default: boolean;
 }
 
 const LAYER_DEFS: LayerDef[] = [
-  { id: "boundary", label: "Boundary", emoji: "🗺️", description: "Constituency outline", default: true },
-  { id: "wards-vote", label: "2024 Vote Share", emoji: "🗳️", description: "Ward-level CON vote choropleth", default: true },
-  { id: "wards-prediction", label: "MRP Prediction", emoji: "📊", description: "EC predicted winner per ward", default: false },
-  { id: "wards-deprivation", label: "Deprivation", emoji: "📉", description: "Ward deprivation levels", default: false },
-  { id: "crime", label: "Crime Reports", emoji: "🔴", description: "Recent crime data (Police API)", default: false },
-  { id: "fixmystreet", label: "Community Issues", emoji: "⚠️", description: "FixMyStreet reports", default: false },
-  { id: "planning", label: "Planning Apps", emoji: "🏗️", description: "Recent planning applications", default: false },
-  { id: "worship", label: "Places of Worship", emoji: "⛪", description: "Religious buildings (OSM)", default: false },
-  { id: "floods", label: "Flood Monitoring", emoji: "🌊", description: "EA flood stations & alerts", default: false },
-  { id: "census", label: "Census Overlay", emoji: "📊", description: "ONS Census 2021 data", default: false },
-  { id: "ward-labels", label: "Ward Names", emoji: "🏷️", description: "Ward name labels", default: true },
+  { id: "boundary", label: "Boundary", description: "Constituency outline", default: true },
+  { id: "wards-vote", label: "2024 Vote Share", description: "Ward-level CON vote choropleth", default: true },
+  { id: "wards-prediction", label: "MRP Prediction", description: "EC predicted winner per ward", default: false },
+  { id: "wards-deprivation", label: "Deprivation", description: "Ward deprivation levels", default: false },
+  { id: "crime", label: "Crime Reports", description: "Recent crime data (Police API)", default: false },
+  { id: "fixmystreet", label: "Community Issues", description: "FixMyStreet reports", default: false },
+  { id: "planning", label: "Planning Apps", description: "Recent planning applications", default: false },
+  { id: "worship", label: "Places of Worship", description: "Religious buildings (OSM)", default: false },
+  { id: "floods", label: "Flood Monitoring", description: "EA flood stations & alerts", default: false },
+  { id: "census", label: "Census Overlay", description: "ONS Census 2021 data", default: false },
+  { id: "ward-labels", label: "Ward Names", description: "Ward name labels", default: true },
 ];
+
+interface BoundaryFeature {
+  type: "Feature";
+  geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon;
+  properties: { PCON24CD: string; PCON24NM: string };
+}
+interface BoundaryCollection {
+  type: "FeatureCollection";
+  features: BoundaryFeature[];
+}
+
+// Module-scope cache for the full 650-constituency GeoJSON so we don't
+// re-fetch + re-parse 21 MB on every slug switch. Returns a FeatureCollection
+// containing just the requested constituency, or null if not found.
+let allBoundariesPromise: Promise<BoundaryCollection> | null = null;
+function loadAllBoundaries(): Promise<BoundaryCollection> {
+  if (!allBoundariesPromise) {
+    allBoundariesPromise = fetch("/geojson/constituencies-all.geojson")
+      .then((res) => {
+        if (!res.ok) throw new Error(`constituencies-all.geojson: ${res.status}`);
+        return res.json();
+      });
+  }
+  return allBoundariesPromise;
+}
+async function loadConstituencyBoundary(onsCode: string): Promise<BoundaryCollection | null> {
+  try {
+    const all = await loadAllBoundaries();
+    const feature = all.features.find((f) => f.properties?.PCON24CD === onsCode);
+    if (!feature) return null;
+    return { type: "FeatureCollection", features: [feature] };
+  } catch (err) {
+    console.error("Failed to load constituency boundary:", err);
+    return null;
+  }
+}
+
 
 interface FMSIssue {
   id: string;
@@ -49,7 +88,18 @@ interface PlanningApp {
   url: string;
 }
 
+function zoomFromBbox(bbox: [number, number, number, number]): number {
+  const maxDeg = Math.max(bbox[2] - bbox[0], bbox[3] - bbox[1]);
+  if (maxDeg < 0.12) return 12;
+  if (maxDeg < 0.25) return 11;
+  if (maxDeg < 0.5) return 10;
+  return 9;
+}
+
 export default function ConstituencyMap() {
+  const { slug } = useConstituency();
+  const isEnglishConstituency = getFullData(slug)?.constituency.onsCode.startsWith("E14") ?? false;
+  const { resolvedTheme } = useTheme();
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const fmsMarkers = useRef<maplibregl.Marker[]>([]);
@@ -71,18 +121,49 @@ export default function ConstituencyMap() {
   });
 
   const toggleLayer = useCallback((id: string) => {
-    setLayers((prev) => ({ ...prev, [id]: !prev[id] }));
+    setLayers((prev) => {
+      const newLayers = { ...prev, [id]: !prev[id] };
+      // Choropleth fill layers are mutually exclusive
+      if (id === "wards-deprivation" && newLayers["wards-deprivation"]) {
+        newLayers["wards-vote"] = false;
+        newLayers["wards-prediction"] = false;
+      } else if (id === "wards-vote" && newLayers["wards-vote"]) {
+        newLayers["wards-deprivation"] = false;
+        newLayers["wards-prediction"] = false;
+      } else if (id === "wards-prediction" && newLayers["wards-prediction"]) {
+        newLayers["wards-vote"] = false;
+        newLayers["wards-deprivation"] = false;
+      }
+      return newLayers;
+    });
   }, []);
 
   // Initialize map
   useEffect(() => {
-    if (!mapContainer.current || map.current) return;
+    if (!mapContainer.current) return;
+    if (map.current) {
+      // Tear down on slug change so we can re-init with new constituency data
+      for (const arr of [fmsMarkers, crimeMarkers, planningMarkers, worshipMarkers, floodMarkers, petitionMarkers, aqMarkers]) {
+        arr.current.forEach((mk) => mk.remove());
+        arr.current = [];
+      }
+      map.current.remove();
+      map.current = null;
+      setMapReady(false);
+    }
+
+    const data = getFullData(slug);
+    const center: [number, number] =
+      data?.geo ? [data.geo.lng, data.geo.lat] : constituencyGeo.center;
+    const zoom = data?.geo?.bbox ? zoomFromBbox(data.geo.bbox) : constituencyGeo.zoom;
 
     const m = new maplibregl.Map({
       container: mapContainer.current,
-      style: "https://tiles.openfreemap.org/styles/dark",
-      center: constituencyGeo.center,
-      zoom: constituencyGeo.zoom,
+      style: resolvedTheme === "light"
+        ? "https://tiles.openfreemap.org/styles/liberty"
+        : "https://tiles.openfreemap.org/styles/dark",
+      center,
+      zoom,
       minZoom: 9,
       maxZoom: 16,
     });
@@ -94,18 +175,21 @@ export default function ConstituencyMap() {
 
     m.on("load", async () => {
       try {
-        // Fetch GeoJSON and live EC data in parallel
-        const [constituencyRes, wardsRes, ecRes] = await Promise.all([
-          fetch("/geojson/braintree-constituency.geojson"),
-          fetch("/geojson/braintree-wards.geojson"),
-          fetch("/api/electoral-calculus?type=seat&seat=Braintree").catch(() => null),
+        // Fetch boundary, wards and live EC data in parallel.
+        // Boundary works for any constituency — extracted from the cached
+        // 21MB constituencies-all.geojson by ONS code. Ward boundaries come
+        // from /api/ward-boundaries which filters the all-UK ONS WD24 dataset.
+        const onsCode = data?.constituency.onsCode;
+        const [constituencyData, wardsRes, ecRes] = await Promise.all([
+          onsCode ? loadConstituencyBoundary(onsCode) : Promise.resolve(null),
+          fetch(`/api/ward-boundaries?constituency=${slug}`).catch(() => null),
+          fetch(withConstituency("/api/electoral-calculus?type=seat", slug)).catch(() => null),
         ]);
 
-        const constituencyData = await constituencyRes.json();
-        const wardsData = await wardsRes.json();
-
-        // Build live EC ward lookup, falling back to static data
-        let wardElectoralCalc = fallbackWardElectoralCalc;
+        // Build live EC ward lookup. Static fallback only applies to Braintree —
+        // for other constituencies an empty object is correct when EC data is unavailable.
+        let wardElectoralCalc: Record<string, { electorate: number; winner2024: string; predictedWinner: string }> =
+          slug === "braintree" ? fallbackWardElectoralCalc : {};
         try {
           if (ecRes && ecRes.ok) {
             const ecData = await ecRes.json();
@@ -129,42 +213,9 @@ export default function ConstituencyMap() {
           // Keep fallback wardElectoralCalc
         }
 
-        // Enrich ward features
-        // Normalize ward names: GeoJSON uses "&" but EC/data may use "and" or vice versa
-        const norm = (s: string) => s.replace(/\s*&\s*/g, " and ").replace(/\s+/g, " ").trim();
-        const wardLookup = new Map(wardData.map((w) => [norm(w.name), w]));
-        // Build EC lookup with normalized keys
-        const ecNorm: Record<string, typeof wardElectoralCalc[string]> = {};
-        for (const [k, v] of Object.entries(wardElectoralCalc)) {
-          ecNorm[norm(k)] = v;
-        }
-        for (const feature of wardsData.features) {
-          const wardName = feature.properties.WD24NM;
-          const key = norm(wardName);
-          const wd = wardLookup.get(key);
-          const ec = ecNorm[key];
-          if (wd) {
-            feature.properties.conVote = wd.conVote;
-            feature.properties.refVote = wd.refVote;
-            feature.properties.labVote = wd.labVote;
-            feature.properties.ldVote = wd.ldVote;
-            feature.properties.grnVote = wd.grnVote;
-            feature.properties.population = wd.population;
-            feature.properties.deprivation = wd.deprivation;
-          }
-          if (ec) {
-            feature.properties.predictedWinner = ec.predictedWinner;
-            feature.properties.winner2024 = ec.winner2024;
-            feature.properties.electorate = ec.electorate;
-          }
-          feature.properties.name = wardName;
-        }
-
-        // === SOURCES ===
+        if (constituencyData) {
+        // === BOUNDARY SOURCE + LAYERS (universal) ===
         m.addSource("constituency", { type: "geojson", data: constituencyData });
-        m.addSource("wards", { type: "geojson", data: wardsData });
-
-        // === LAYER: Constituency Boundary ===
         m.addLayer({
           id: "boundary-fill",
           type: "fill",
@@ -178,16 +229,79 @@ export default function ConstituencyMap() {
           paint: { "line-color": "#10b981", "line-width": 2.5, "line-dasharray": [3, 2] },
         });
 
+        // === WARD SOURCE + LAYERS ===
+        if (wardsRes && wardsRes.ok) {
+        const wardsData = await wardsRes.json();
+
+        // Enrich ward features
+        // Normalize ward names: GeoJSON uses "&" but EC/data may use "and" or vice versa
+        const norm = (s: string) => s.replace(/\s*&\s*/g, " and ").replace(/\s+/g, " ").trim();
+        const wardLookup = slug === "braintree"
+          ? new Map(wardData.map((w) => [norm(w.name), w]))
+          : new Map();
+        // Build EC lookup with normalized keys
+        const ecNorm: Record<string, typeof wardElectoralCalc[string]> = {};
+        for (const [k, v] of Object.entries(wardElectoralCalc)) {
+          ecNorm[norm(k)] = v;
+        }
+        // MHCLG IMD 2019 deprivation, keyed by WD24CD per constituency. Falls
+        // through to Braintree's static name-keyed `wd.deprivation` below if
+        // the slug isn't covered here yet.
+        const depByCode = new Map(
+          (WARD_DEPRIVATION[slug] ?? []).map((w) => [w.code, w.class])
+        );
+        for (const feature of wardsData.features) {
+          const wardName = feature.properties.WD24NM;
+          const wardCode = feature.properties.WD24CD;
+          const key = norm(wardName);
+          const wd = wardLookup.get(key);
+          const ec = ecNorm[key];
+          if (wd) {
+            feature.properties.conVote = wd.conVote;
+            feature.properties.refVote = wd.refVote;
+            feature.properties.labVote = wd.labVote;
+            feature.properties.ldVote = wd.ldVote;
+            feature.properties.grnVote = wd.grnVote;
+            feature.properties.population = wd.population;
+            feature.properties.deprivation = wd.deprivation;
+          }
+          const dep = depByCode.get(wardCode);
+          if (dep) feature.properties.deprivation = dep;
+          if (ec) {
+            feature.properties.predictedWinner = ec.predictedWinner;
+            feature.properties.winner2024 = ec.winner2024;
+            feature.properties.electorate = ec.electorate;
+          }
+          feature.properties.name = wardName;
+        }
+
+        m.addSource("wards", { type: "geojson", data: wardsData });
+
+        // Party-colour expression shared between the 2024 Vote Share and MRP
+        // Prediction layers. Driven by per-ward EC data attached during
+        // enrichment (`winner2024` / `predictedWinner`). Both layers use the
+        // same colour scheme so swaps between them are visually consistent.
+        const partyColourBy = (field: string): maplibregl.ExpressionSpecification => [
+          "match", ["get", field],
+          "CON", "#0087DC",
+          "LAB", "#DC241f",
+          "Reform", "#12B6CF",
+          "LIB", "#FAA61A",
+          "Green", "#6AB023",
+          "#666666",
+        ];
+        const predColorExpr = partyColourBy("predictedWinner");
+
         // === LAYER: Ward 2024 Vote Choropleth ===
+        // Coloured by the EC-derived `winner2024` field rather than a static
+        // Conservative-only vote-share gradient. Works for any constituency
+        // that has EC ward data (currently Braintree + Clacton).
         m.addLayer({
           id: "wards-vote-fill",
           type: "fill",
           source: "wards",
           paint: {
-            "fill-color": [
-              "interpolate", ["linear"], ["coalesce", ["get", "conVote"], 40],
-              30, "#e74c3c", 36, "#f39c12", 40, "#3498db", 45, "#2471a3", 50, "#1a5276",
-            ],
+            "fill-color": partyColourBy("winner2024"),
             "fill-opacity": 0.5,
           },
         });
@@ -199,15 +313,6 @@ export default function ConstituencyMap() {
         });
 
         // === LAYER: MRP Prediction ===
-        const predColorExpr: maplibregl.ExpressionSpecification = [
-          "match", ["get", "predictedWinner"],
-          "CON", "#0087DC",
-          "LAB", "#DC241f",
-          "Reform", "#12B6CF",
-          "LIB", "#FAA61A",
-          "Green", "#6AB023",
-          "#666666",
-        ];
         m.addLayer({
           id: "wards-prediction-fill",
           type: "fill",
@@ -296,7 +401,7 @@ export default function ConstituencyMap() {
                 <div style="flex:1; padding: 6px; border-radius: 6px; background: ${changed ? "rgba(239,68,68,0.1)" : "rgba(16,185,129,0.1)"}; text-align: center; border: 1px solid ${changed ? "rgba(239,68,68,0.3)" : "rgba(16,185,129,0.2)"};">
                   <div style="font-size: 9px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;">MRP Prediction</div>
                   <div style="font-size: 14px; font-weight: 700; color: ${predColor}; margin-top: 2px;">${props.predictedWinner}</div>
-                  ${changed ? '<div style="font-size: 9px; color: #ef4444; margin-top: 2px;">⚡ SWING</div>' : ""}
+                  ${changed ? '<div style="font-size: 9px; color: #ef4444; margin-top: 2px;">SWING</div>' : ""}
                 </div>
               </div>` : ""}
               ${props.conVote ? `
@@ -324,8 +429,9 @@ export default function ConstituencyMap() {
           m.on("mouseenter", layerId, () => { m.getCanvas().style.cursor = "pointer"; });
           m.on("mouseleave", layerId, () => { m.getCanvas().style.cursor = ""; });
         }
+        } // end if (wardsRes)
 
-        // Fit to constituency bounds
+        // Fit to constituency bounds (works for any constituency)
         const geom = constituencyData.features?.[0]?.geometry;
         if (geom) {
           const bounds = new maplibregl.LngLatBounds();
@@ -333,10 +439,11 @@ export default function ConstituencyMap() {
           for (const coord of coords) bounds.extend(coord as [number, number]);
           m.fitBounds(bounds, { padding: 40 });
         }
+        } // end if (constituencyData)
 
         // Load FixMyStreet data for markers
         try {
-          const fmsRes = await fetch("/api/fixmystreet");
+          const fmsRes = await fetch(withConstituency("/api/fixmystreet", slug));
           const fmsData = await fmsRes.json();
           const issues: FMSIssue[] = fmsData.issues || [];
           for (const issue of issues.slice(0, 50)) {
@@ -350,7 +457,7 @@ export default function ConstituencyMap() {
               .setPopup(
                 new maplibregl.Popup({ offset: 8, maxWidth: "220px" }).setHTML(
                   `<div style="font-family:system-ui;padding:4px;">
-                    <div style="font-weight:600;font-size:12px;color:#f1f5f9;margin-bottom:2px;">⚠️ ${issue.title}</div>
+                    <div style="font-weight:600;font-size:12px;color:#f1f5f9;margin-bottom:2px;">${issue.title}</div>
                     <div style="font-size:11px;color:#94a3b8;">${issue.category}</div>
                     <a href="${issue.url || `https://www.fixmystreet.com/report/${issue.id}`}" target="_blank" rel="noopener noreferrer" style="font-size:10px;color:#6ee7b7;text-decoration:none;margin-top:4px;display:inline-block;">View report ↗</a>
                   </div>`
@@ -365,7 +472,7 @@ export default function ConstituencyMap() {
 
         // Load crime data
         try {
-          const crimeRes = await fetch("/api/crime");
+          const crimeRes = await fetch(withConstituency("/api/crime", slug));
           const crimeData = await crimeRes.json();
           interface CrimeItem { category: string; lat: number; lng: number; street: string; month: string; outcome: string | null; }
           const crimes: CrimeItem[] = crimeData.crimes || [];
@@ -392,11 +499,11 @@ export default function ConstituencyMap() {
               .setPopup(
                 new maplibregl.Popup({ offset: 6, maxWidth: "200px" }).setHTML(
                   `<div style="font-family:system-ui;padding:4px;">
-                    <div style="font-weight:600;font-size:12px;color:#f1f5f9;margin-bottom:2px;">🔴 ${crime.category}</div>
+                    <div style="font-weight:600;font-size:12px;color:#f1f5f9;margin-bottom:2px;">${crime.category}</div>
                     <div style="font-size:11px;color:#94a3b8;">${crime.street}</div>
                     ${crime.month ? `<div style="font-size:10px;color:#71717a;margin-top:2px;">${crime.month}</div>` : ""}
                     ${crime.outcome ? `<div style="font-size:10px;color:#a1a1aa;margin-top:1px;">Outcome: ${crime.outcome}</div>` : ""}
-                    <a href="https://www.police.uk/pu/your-area/essex-police/braintree/?tab=CrimeMap" target="_blank" rel="noopener noreferrer" style="font-size:10px;color:#6ee7b7;text-decoration:none;margin-top:4px;display:inline-block;">View area crime map ↗</a>
+                    <a href="https://www.police.uk" target="_blank" rel="noopener noreferrer" style="font-size:10px;color:#6ee7b7;text-decoration:none;margin-top:4px;display:inline-block;">View area crime map ↗</a>
                   </div>`
                 )
               )
@@ -409,7 +516,7 @@ export default function ConstituencyMap() {
 
         // Load planning applications
         try {
-          const planRes = await fetch("/api/planning");
+          const planRes = await fetch(withConstituency("/api/planning", slug));
           const planData = await planRes.json();
           const apps: PlanningApp[] = planData.applications || [];
           const planColors: Record<string, string> = {
@@ -424,7 +531,7 @@ export default function ConstituencyMap() {
           for (const app of apps.slice(0, 30)) {
             if (!app.lat || !app.lng) continue;
             const color = planColors[app.type] || "#6b7280";
-            const statusIcon = app.status === "approved" ? "✅" : app.status === "refused" ? "❌" : app.status === "pending" ? "⏳" : "📋";
+            const statusIcon = app.status === "approved" ? "Approved" : app.status === "refused" ? "Refused" : app.status === "pending" ? "Pending" : "Unknown";
             const el = document.createElement("div");
             el.style.cssText = `width:10px;height:10px;background:${color};border:2px solid rgba(255,255,255,0.6);border-radius:2px;cursor:pointer;display:none;`;
             el.className = "planning-marker";
@@ -450,7 +557,7 @@ export default function ConstituencyMap() {
 
         // Load places of worship
         try {
-          const worshipRes = await fetch("/api/worship");
+          const worshipRes = await fetch(withConstituency("/api/worship", slug));
           const worshipData = await worshipRes.json();
           interface WorshipItem { id: number; name: string; religion: string; denomination: string; address: string; lat: number; lng: number; }
           const places: WorshipItem[] = worshipData.places || [];
@@ -498,7 +605,7 @@ export default function ConstituencyMap() {
 
         // Load flood monitoring stations
         try {
-          const floodRes = await fetch("/api/floods");
+          const floodRes = await fetch(withConstituency("/api/floods", slug));
           const floodData = await floodRes.json();
           interface FloodStation { id: string; label: string; lat: number; lng: number; river: string; type: string; latestValue: number | null; unit: string; }
           const stns: FloodStation[] = floodData.stations || [];
@@ -514,7 +621,7 @@ export default function ConstituencyMap() {
               .setPopup(
                 new maplibregl.Popup({ offset: 8, maxWidth: "220px" }).setHTML(
                   `<div style="font-family:system-ui;padding:4px;">
-                    <div style="font-weight:600;font-size:12px;color:#f1f5f9;margin-bottom:2px;">🌊 ${stn.label}</div>
+                    <div style="font-weight:600;font-size:12px;color:#f1f5f9;margin-bottom:2px;">${stn.label}</div>
                     <div style="font-size:11px;color:#94a3b8;">${stn.river || "Monitoring Station"}</div>
                     ${stn.latestValue !== null ? `<div style="font-size:11px;color:#60a5fa;margin-top:2px;">Latest: ${stn.latestValue} ${stn.unit}</div>` : ""}
                   </div>`
@@ -526,7 +633,7 @@ export default function ConstituencyMap() {
 
           // Show flood warnings if any
           for (const warning of (floodData.warnings || []).slice(0, 5)) {
-            console.log("⚠️ Flood warning:", warning.description);
+            console.log("Flood warning:", warning.description);
           }
         } catch {
           // Flood data optional
@@ -560,7 +667,7 @@ export default function ConstituencyMap() {
       map.current?.remove();
       map.current = null;
     };
-  }, []);
+  }, [slug, resolvedTheme]);
 
   // Sync layer visibility
   useEffect(() => {
@@ -651,7 +758,7 @@ export default function ConstituencyMap() {
 
     const fetchCensus = async () => {
       try {
-        const res = await fetch(`/api/census?topic=${censusTopic}`);
+        const res = await fetch(withConstituency(`/api/census?topic=${censusTopic}`, slug));
         const data = await res.json();
         if (!data.wards) return;
 
@@ -669,8 +776,9 @@ export default function ConstituencyMap() {
         if (!source) return;
 
         // We need to get the current data and enrich it
-        // Use the wards geojson URL since we can't read from source directly
-        const wardsRes = await fetch("/geojson/braintree-wards.geojson");
+        // Use the wards API since we can't read from a MapLibre source directly
+        const wardsRes = await fetch(`/api/ward-boundaries?constituency=${slug}`);
+        if (!wardsRes.ok) return;
         const wardsGeo = await wardsRes.json();
         for (const feature of wardsGeo.features) {
           const code = feature.properties.WD24CD;
@@ -749,7 +857,7 @@ export default function ConstituencyMap() {
 
     fetchCensus();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [censusTopic, layers, mapReady]);
+  }, [censusTopic, layers, mapReady, slug]);
 
   // Fetch petitions when layer is toggled on
   useEffect(() => {
@@ -768,7 +876,7 @@ export default function ConstituencyMap() {
 
     const fetchPetitions = async () => {
       try {
-        const res = await fetch("/api/petitions");
+        const res = await fetch(withConstituency("/api/petitions", slug));
         const data = await res.json();
         interface PetitionItem { title: string; url: string; totalSignatures: number; localSignatures: number; salience: number; overIndexed: boolean; }
         const petitions: PetitionItem[] = data.petitions || [];
@@ -785,7 +893,7 @@ export default function ConstituencyMap() {
         const topItems = petitions.slice(0, 8);
         const popupHtml = `
           <div style="font-family:system-ui;padding:6px;max-width:280px;">
-            <div style="font-weight:700;font-size:13px;color:#f1f5f9;margin-bottom:4px;">📝 E-Petitions — Braintree</div>
+            <div style="font-weight:700;font-size:13px;color:#f1f5f9;margin-bottom:4px;">E-Petitions — Braintree</div>
             <div style="font-size:10px;color:#a78bfa;margin-bottom:6px;">${overIndexed.length} of ${petitions.length} petitions over-indexed locally</div>
             ${topItems.map((p) => `
               <div style="margin-bottom:5px;padding:4px;border-radius:3px;background:${p.overIndexed ? "rgba(139,92,246,0.12)" : "rgba(100,116,139,0.08)"};">
@@ -834,7 +942,7 @@ export default function ConstituencyMap() {
 
     const fetchAQ = async () => {
       try {
-        const res = await fetch("/api/air-quality");
+        const res = await fetch(withConstituency("/api/air-quality", slug));
         const data = await res.json();
         interface AQParam { parameter: string; lastValue: number; unit: string; }
         interface AQStation { id: number; name: string; lat: number; lng: number; parameters: AQParam[]; }
@@ -870,7 +978,7 @@ export default function ConstituencyMap() {
             .setPopup(
               new maplibregl.Popup({ offset: 8, maxWidth: "220px" }).setHTML(
                 `<div style="font-family:system-ui;padding:4px;">
-                  <div style="font-weight:600;font-size:12px;color:#f1f5f9;margin-bottom:4px;">🌬️ ${stn.name}</div>
+                  <div style="font-weight:600;font-size:12px;color:#f1f5f9;margin-bottom:4px;">${stn.name}</div>
                   ${paramsHtml || '<div style="font-size:11px;color:#64748b;">No recent readings</div>'}
                   <a href="https://openaq.org/locations/${stn.id}" target="_blank" rel="noopener noreferrer" style="font-size:10px;color:#6ee7b7;text-decoration:none;margin-top:4px;display:inline-block;">View on OpenAQ ↗</a>
                 </div>`
@@ -907,31 +1015,44 @@ export default function ConstituencyMap() {
       <div className="absolute top-3 left-3 z-10 w-52">
         <button
           onClick={() => setLayerPanel(!layerPanel)}
-          className="w-full flex items-center justify-between bg-zinc-900/95 backdrop-blur border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-200 font-medium hover:bg-zinc-800/95 transition-colors"
+          className="w-full flex items-center justify-between bg-card/95 backdrop-blur border border-border rounded-lg px-3 py-2 text-xs text-foreground font-medium hover:bg-muted/95 transition-colors"
         >
           <span className="flex items-center gap-1.5">
             <Layers className="h-3.5 w-3.5 text-emerald-400" />
             Layers
           </span>
-          {layerPanel ? <ChevronUp className="h-3.5 w-3.5 text-zinc-500" /> : <ChevronDown className="h-3.5 w-3.5 text-zinc-500" />}
+          {layerPanel ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
         </button>
 
         {layerPanel && (
-          <div className="mt-1 bg-zinc-900/95 backdrop-blur border border-zinc-700 rounded-lg overflow-hidden">
-            {LAYER_DEFS.map((layer) => (
+          <div className="mt-1 bg-card/95 backdrop-blur border border-border rounded-lg overflow-hidden">
+            {LAYER_DEFS.map((layer) => {
+              const hasDeprivationData =
+                layer.id !== "wards-deprivation" || isEnglishConstituency;
+              return (
               <div key={layer.id}>
                 <label
-                  className="flex items-center gap-2 px-3 py-1.5 hover:bg-zinc-800/50 cursor-pointer transition-colors"
+                  className={`flex items-center gap-2 px-3 py-1.5 transition-colors ${
+                    hasDeprivationData
+                      ? "hover:bg-muted/50 cursor-pointer"
+                      : "cursor-not-allowed opacity-40"
+                  }`}
+                  title={
+                    !hasDeprivationData
+                      ? "Deprivation data not yet sourced for this constituency"
+                      : undefined
+                  }
                 >
                   <input
                     type="checkbox"
                     checked={layers[layer.id] || false}
-                    onChange={() => toggleLayer(layer.id)}
-                    className="w-3 h-3 rounded border-zinc-600 bg-zinc-800 text-emerald-500 focus:ring-0 focus:ring-offset-0 accent-emerald-500"
+                    onChange={() => hasDeprivationData && toggleLayer(layer.id)}
+                    disabled={!hasDeprivationData}
+                    className="w-3 h-3 rounded border-border bg-muted text-emerald-500 focus:ring-0 focus:ring-offset-0 accent-emerald-500 disabled:cursor-not-allowed"
                   />
-                  <span className="text-sm">{layer.emoji}</span>
+
                   <div className="flex-1 min-w-0">
-                    <div className="text-[11px] text-zinc-300">{layer.label}</div>
+                    <div className="text-[11px] text-foreground">{layer.label}</div>
                   </div>
                 </label>
                 {/* Census topic selector dropdown */}
@@ -940,7 +1061,7 @@ export default function ConstituencyMap() {
                     <select
                       value={censusTopic}
                       onChange={(e) => setCensusTopic(e.target.value)}
-                      className="w-full text-[10px] bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-zinc-300 focus:outline-none focus:border-emerald-500"
+                      className="w-full text-[10px] bg-muted border border-border rounded px-2 py-1 text-foreground focus:outline-none focus:border-emerald-500"
                     >
                       <option value="age-under16">Age: Under 16</option>
                       <option value="age-over65">Age: Over 65</option>
@@ -958,15 +1079,16 @@ export default function ConstituencyMap() {
                   </div>
                 )}
               </div>
-            ))}
+            );
+            })}
           </div>
         )}
       </div>
 
       {/* Crime source link */}
       {layers["crime"] && (
-        <div className="absolute bottom-3 left-3 bg-zinc-900/95 backdrop-blur rounded-lg p-2 border border-zinc-700 z-10">
-          <div className="text-[10px] text-zinc-400 mb-1 font-medium">Crime Reports</div>
+        <div className="absolute bottom-3 left-3 bg-card/95 backdrop-blur rounded-lg p-2 border border-border z-10">
+          <div className="text-[10px] text-muted-foreground mb-1 font-medium">Crime Reports</div>
           <div className="flex flex-wrap gap-1.5 mb-1.5">
             {[
               { cat: "ASB", color: "#f59e0b" },
@@ -978,7 +1100,7 @@ export default function ConstituencyMap() {
             ].map((c) => (
               <div key={c.cat} className="flex items-center gap-1">
                 <div className="h-2 w-2 rounded-full" style={{ background: c.color }} />
-                <span className="text-[9px] text-zinc-500">{c.cat}</span>
+                <span className="text-[9px] text-muted-foreground">{c.cat}</span>
               </div>
             ))}
           </div>
@@ -990,10 +1112,10 @@ export default function ConstituencyMap() {
 
       {/* Dynamic Legend */}
       {activeChoropleth && (
-        <div className="absolute bottom-3 right-3 bg-zinc-900/95 backdrop-blur rounded-lg p-3 border border-zinc-700 z-10">
+        <div className="absolute bottom-3 right-3 bg-card/95 backdrop-blur rounded-lg p-3 border border-border z-10">
           {activeChoropleth === "vote" && (
             <>
-              <div className="text-xs text-zinc-400 mb-2 font-medium">CON Vote Share (2024)</div>
+              <div className="text-xs text-foreground mb-2 font-medium">CON Vote Share (2024)</div>
               <div className="flex items-center gap-0.5">
                 <div className="h-3 w-5 rounded-sm" style={{ background: "#e74c3c" }} />
                 <div className="h-3 w-5 rounded-sm" style={{ background: "#f39c12" }} />
@@ -1001,14 +1123,14 @@ export default function ConstituencyMap() {
                 <div className="h-3 w-5 rounded-sm" style={{ background: "#2471a3" }} />
                 <div className="h-3 w-5 rounded-sm" style={{ background: "#1a5276" }} />
               </div>
-              <div className="flex justify-between text-[10px] text-zinc-500 mt-1">
+              <div className="flex justify-between text-[10px] text-muted-foreground mt-1">
                 <span>30%</span><span>40%</span><span>50%</span>
               </div>
             </>
           )}
           {activeChoropleth === "prediction" && (
             <>
-              <div className="text-xs text-zinc-400 mb-2 font-medium">MRP Predicted Winner</div>
+              <div className="text-xs text-foreground mb-2 font-medium">MRP Predicted Winner</div>
               <div className="space-y-1">
                 {[
                   { party: "CON", color: "#0087DC" },
@@ -1017,7 +1139,7 @@ export default function ConstituencyMap() {
                 ].map((p) => (
                   <div key={p.party} className="flex items-center gap-1.5">
                     <div className="h-3 w-4 rounded-sm" style={{ background: p.color }} />
-                    <span className="text-[11px] text-zinc-400">{p.party}</span>
+                    <span className="text-[11px] text-foreground">{p.party}</span>
                   </div>
                 ))}
               </div>
@@ -1025,7 +1147,7 @@ export default function ConstituencyMap() {
           )}
           {activeChoropleth === "deprivation" && (
             <>
-              <div className="text-xs text-zinc-400 mb-2 font-medium">Deprivation Level</div>
+              <div className="text-xs text-foreground mb-2 font-medium">Deprivation Level</div>
               <div className="space-y-1">
                 {[
                   { level: "Low", color: "#10b981" },
@@ -1034,7 +1156,7 @@ export default function ConstituencyMap() {
                 ].map((d) => (
                   <div key={d.level} className="flex items-center gap-1.5">
                     <div className="h-3 w-4 rounded-sm" style={{ background: d.color }} />
-                    <span className="text-[11px] text-zinc-400">{d.level}</span>
+                    <span className="text-[11px] text-foreground">{d.level}</span>
                   </div>
                 ))}
               </div>
@@ -1042,8 +1164,8 @@ export default function ConstituencyMap() {
           )}
           {activeChoropleth === "census" && (
             <>
-              <div className="text-xs text-zinc-400 mb-1 font-medium">Census 2021</div>
-              <div className="text-[10px] text-zinc-300 mb-2">{censusLabel}</div>
+              <div className="text-xs text-foreground mb-1 font-medium">Census 2021</div>
+              <div className="text-[10px] text-muted-foreground mb-2">{censusLabel}</div>
               <div className="flex items-center gap-0.5">
                 <div className="h-3 w-4 rounded-sm" style={{ background: "#1b263b" }} />
                 <div className="h-3 w-4 rounded-sm" style={{ background: "#415a77" }} />
@@ -1053,10 +1175,10 @@ export default function ConstituencyMap() {
                 <div className="h-3 w-4 rounded-sm" style={{ background: "#e76f51" }} />
                 <div className="h-3 w-4 rounded-sm" style={{ background: "#d62828" }} />
               </div>
-              <div className="flex justify-between text-[10px] text-zinc-500 mt-1">
+              <div className="flex justify-between text-[10px] text-muted-foreground mt-1">
                 <span>Low</span><span>Avg: {censusAvg}%</span><span>High</span>
               </div>
-              <div className="text-[9px] text-zinc-600 mt-1.5">Source: ONS Census 2021</div>
+              <div className="text-[9px] text-muted-foreground mt-1.5">Source: ONS Census 2021</div>
             </>
           )}
         </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 // Match the actual API response from /api/cqc
 interface LocationResult {
@@ -93,29 +94,30 @@ function formatDate(d: string): string {
 }
 
 export default function CQCPanel() {
+  const { slug } = useConstituency();
   const [data, setData] = useState<CQCData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/cqc")
+    fetch(withConstituency("/api/cqc", slug))
       .then((res) => res.json())
       .then((d: CQCData) => setData(d))
       .catch(() => setData(null))
       .finally(() => setLoading(false));
-  }, []);
+  }, [slug]);
 
   if (loading) {
     return (
       <div className="animate-pulse">
-        <div className="h-4 bg-zinc-800 rounded w-40 mb-4" />
+        <div className="h-4 bg-muted rounded w-40 mb-4" />
         <div className="grid grid-cols-4 gap-3 mb-4">
           {[...Array(4)].map((_, i) => (
-            <div key={i} className="h-16 bg-zinc-900 rounded-xl" />
+            <div key={i} className="h-16 bg-muted rounded-xl" />
           ))}
         </div>
         <div className="space-y-2">
           {[...Array(5)].map((_, i) => (
-            <div key={i} className="h-12 bg-zinc-900 rounded-xl" />
+            <div key={i} className="h-12 bg-muted rounded-xl" />
           ))}
         </div>
       </div>
@@ -129,6 +131,25 @@ export default function CQCPanel() {
   const summary = data.summary ?? { outstanding: 0, good: 0, requiresImprovement: 0, inadequate: 0 };
   const locations = data.locations ?? [];
   const total = data.totalFound ?? locations.length;
+
+  // API returns 403 — show a clean empty state rather than four zeros
+  if (total === 0) {
+    return (
+      <div className="p-4 space-y-2 text-center">
+        <p className="text-xs text-zinc-500">
+          CQC provider data not currently available for this constituency.
+        </p>
+        <a
+          href={`https://www.cqc.org.uk/search/services`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[11px] text-emerald-500 hover:text-emerald-400 transition-colors"
+        >
+          Search care providers on cqc.org.uk ↗
+        </a>
+      </div>
+    );
+  }
 
   const summaryCards = [
     {
@@ -187,7 +208,7 @@ export default function CQCPanel() {
             {locations.map((loc, i) => (
               <div
                 key={i}
-                className="bg-zinc-900 rounded-xl px-3 py-2 flex items-center justify-between gap-2"
+                className="bg-muted rounded-xl px-3 py-2 flex items-center justify-between gap-2"
               >
                 <div className="min-w-0 flex-1">
                   <div className="text-xs text-zinc-200 truncate">

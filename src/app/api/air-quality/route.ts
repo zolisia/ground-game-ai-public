@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getFullData } from "@/data";
 
 // Force dynamic — fetches live external data
 export const dynamic = "force-dynamic";
@@ -8,10 +9,6 @@ export const dynamic = "force-dynamic";
 // Docs: https://docs.openaq.org/
 
 const OPENAQ_API = "https://api.openaq.org/v3/locations";
-
-// Braintree constituency center
-const CENTER_LAT = 51.974;
-const CENTER_LNG = 0.535;
 const RADIUS_M = 25000; // 25km radius
 
 interface AQParameter {
@@ -28,7 +25,21 @@ interface AQStation {
   parameters: AQParameter[];
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const constituencySlug = searchParams.get("constituency") || "braintree";
+  const constituencyData = getFullData(constituencySlug);
+
+  if (!constituencyData || !constituencyData.geo) {
+    return Response.json(
+      { error: "Invalid constituency slug or geo data missing" },
+      { status: 400 }
+    );
+  }
+
+  const CENTER_LAT = constituencyData.geo.lat;
+  const CENTER_LNG = constituencyData.geo.lng;
+
   try {
     const res = await fetch(
       `${OPENAQ_API}?coordinates=${CENTER_LAT},${CENTER_LNG}&radius=${RADIUS_M}&limit=10`,
@@ -104,7 +115,12 @@ export async function GET() {
   }
 }
 
-// Fallback data from DEFRA AURN monitoring network near Braintree
+// Fallback data from DEFRA AURN monitoring network near Braintree.
+// TODO: this fallback is still Braintree-specific — the three hardcoded stations
+// (Chelmsford / Colchester / Southend) are only roughly relevant for constituencies
+// in the East of England. Misleading for distant constituencies (e.g. Scotland).
+// Multi-constituency support would require a per-constituency nearest-stations
+// lookup or sourcing DEFRA AURN station coords by region.
 function getFallbackData() {
   return {
     stations: [

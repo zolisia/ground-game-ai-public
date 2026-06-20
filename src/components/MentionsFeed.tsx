@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ExternalLink, RefreshCw, AlertCircle, Heart, Repeat2, CheckCircle2 } from "lucide-react";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 interface SocialMention {
   text: string;
@@ -23,6 +24,7 @@ interface MentionsData {
 }
 
 export default function MentionsFeed() {
+  const { slug } = useConstituency();
   const [data, setData] = useState<MentionsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +33,7 @@ export default function MentionsFeed() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/mentions");
+      const res = await fetch(withConstituency("/api/mentions", slug));
       if (!res.ok) throw new Error("Failed to fetch mentions");
       const json: MentionsData = await res.json();
       setData(json);
@@ -44,7 +46,8 @@ export default function MentionsFeed() {
 
   useEffect(() => {
     fetchData();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
 
   if (loading) {
     return (
@@ -52,11 +55,11 @@ export default function MentionsFeed() {
         {[...Array(4)].map((_, i) => (
           <div key={i} className="animate-pulse space-y-2">
             <div className="flex items-center gap-2">
-              <div className="h-7 w-7 rounded-full bg-zinc-800" />
-              <div className="h-3 bg-zinc-800 rounded w-28" />
+              <div className="h-7 w-7 rounded-full bg-muted" />
+              <div className="h-3 bg-muted rounded w-28" />
             </div>
-            <div className="h-3 bg-zinc-800/50 rounded w-full ml-9" />
-            <div className="h-3 bg-zinc-800/50 rounded w-2/3 ml-9" />
+            <div className="h-3 bg-muted/50 rounded w-full ml-9" />
+            <div className="h-3 bg-muted/50 rounded w-2/3 ml-9" />
           </div>
         ))}
       </div>
@@ -81,7 +84,7 @@ export default function MentionsFeed() {
   if (!data || data.mentions.length === 0) {
     return (
       <div className="p-6 text-center">
-        <div className="inline-flex items-center justify-center h-10 w-10 rounded-full bg-zinc-800/60 mb-3">
+        <div className="inline-flex items-center justify-center h-10 w-10 rounded-full bg-muted/60 mb-3">
           <AlertCircle className="h-5 w-5 text-zinc-500" />
         </div>
         <p className="text-sm font-medium text-zinc-400">
@@ -104,11 +107,11 @@ export default function MentionsFeed() {
             href={mention.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="block px-3 py-3 hover:bg-zinc-800/30 transition-colors group"
+            className="block px-3 py-3 hover:bg-muted/30 transition-colors group"
           >
             <div className="flex items-start gap-2.5">
               {/* Avatar placeholder */}
-              <div className="mt-0.5 shrink-0 h-7 w-7 rounded-full bg-zinc-800 flex items-center justify-center text-[10px] font-bold text-zinc-400">
+              <div className="mt-0.5 shrink-0 h-7 w-7 rounded-full bg-muted flex items-center justify-center text-[10px] font-bold text-zinc-400">
                 {mention.author.charAt(0).toUpperCase()}
               </div>
 
@@ -156,7 +159,7 @@ export default function MentionsFeed() {
       </div>
 
       {/* Footer */}
-      <div className="px-4 py-2 border-t border-zinc-800/50 flex items-center justify-between text-[11px] text-zinc-600">
+      <div className="px-4 py-2 border-t border-border/50 flex items-center justify-between text-[11px] text-zinc-600">
         <span>{data.total} mentions</span>
         <button
           onClick={fetchData}

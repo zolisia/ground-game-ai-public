@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 interface Indicator {
   name: string;
@@ -65,7 +66,7 @@ function ComparisonBar({
     <div className="mt-1.5 space-y-1">
       <div className="flex items-center gap-2">
         <span className="text-[10px] text-zinc-500 w-14 shrink-0">Local</span>
-        <div className="flex-1 h-2 bg-zinc-800 rounded-full overflow-hidden">
+        <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
           <div
             className={`h-full rounded-full ${barColor}`}
             style={{ width: `${Math.min(localPct, 100)}%` }}
@@ -74,7 +75,7 @@ function ComparisonBar({
       </div>
       <div className="flex items-center gap-2">
         <span className="text-[10px] text-zinc-500 w-14 shrink-0">GB Avg</span>
-        <div className="flex-1 h-2 bg-zinc-800 rounded-full overflow-hidden">
+        <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
           <div
             className="h-full rounded-full bg-zinc-500"
             style={{ width: `${Math.min(avgPct, 100)}%` }}
@@ -86,24 +87,25 @@ function ComparisonBar({
 }
 
 export default function EmploymentPanel() {
+  const { slug } = useConstituency();
   const [data, setData] = useState<EmploymentData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/employment")
+    fetch(withConstituency("/api/employment", slug))
       .then((res) => res.json())
       .then((d: EmploymentData) => setData(d))
       .catch(() => setData(null))
       .finally(() => setLoading(false));
-  }, []);
+  }, [slug]);
 
   if (loading) {
     return (
-      <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 animate-pulse">
-        <div className="h-4 bg-zinc-800 rounded w-40 mb-4" />
+      <div className="bg-background border border-border rounded-2xl p-4 animate-pulse">
+        <div className="h-4 bg-muted rounded w-40 mb-4" />
         <div className="grid grid-cols-2 gap-3">
           {[...Array(4)].map((_, i) => (
-            <div key={i} className="h-20 bg-zinc-900 rounded-xl" />
+            <div key={i} className="h-20 bg-muted rounded-xl" />
           ))}
         </div>
       </div>
@@ -112,14 +114,14 @@ export default function EmploymentPanel() {
 
   if (!data || data.error) {
     return (
-      <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4">
+      <div className="bg-background border border-border rounded-2xl p-4">
         <p className="text-zinc-500 text-xs">Employment data unavailable</p>
       </div>
     );
   }
 
   return (
-    <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 space-y-4">
+    <div className="bg-background border border-border rounded-2xl p-4 space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-zinc-200">Employment &amp; Economy</h3>
@@ -135,7 +137,7 @@ export default function EmploymentPanel() {
 
       {/* Claimant count highlight */}
       {data.claimantCount && data.claimantCount.rate != null && (
-        <div className="bg-zinc-900 rounded-xl p-3 flex items-center justify-between">
+        <div className="bg-muted rounded-xl p-3 flex items-center justify-between">
           <div>
             <div className="text-[10px] text-zinc-500 uppercase tracking-wider">
               Claimant Count
@@ -191,7 +193,7 @@ export default function EmploymentPanel() {
               : "text-red-400";
 
           return (
-            <div key={ind.name} className="bg-zinc-900 rounded-xl p-3">
+            <div key={ind.name} className="bg-muted rounded-xl p-3">
               <div className="text-[10px] text-zinc-500 uppercase tracking-wider leading-tight">
                 {displayName}
               </div>

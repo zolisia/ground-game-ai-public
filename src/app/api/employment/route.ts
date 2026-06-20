@@ -1,16 +1,26 @@
 import { NextResponse } from "next/server";
+import type { DocumentReference } from "firebase-admin/firestore";
+import { adminDb } from "@/lib/firebase-admin";
+import { getFullData } from "@/data";
 
-// Force dynamic — fetches live external data
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 // NOMIS (ONS) Labour Market Statistics — free, no auth required
 // Docs: https://www.nomisweb.co.uk/api/v01/
-// Geography: Braintree district (TYPE434, post-April 2019) = 1820328091
 // NM_127_1: Model-based unemployment estimates (available at district level)
 // NM_162_1: Claimant count (JSA + UC) (available at district level)
 // NM_17_5: Annual Population Survey (country-level only — NOT available at district level)
+//
+// Geography: NOMIS accepts multiple geography-type codes for the same district
+// (e.g. TYPE434 "1820328091" and the older-type "1778384987" both resolve to
+// Braintree / geogcode E07000067 for NM_127_1). We use the data-layer
+// `nomisCode` (1778…) where available; the BRAINTREE_LAD_NOMIS fallback below
+// is the TYPE434 form that predates the data layer.
 
-const BRAINTREE_GEO = "1820328091";
+const TTL_MS = 24 * 60 * 60 * 1000;
+
+const BRAINTREE_LAD_NOMIS = "1820328091";
 
 // GB-level geography code for NM_127_1
 const GB_GEO = "2092957699";
@@ -38,21 +48,39 @@ interface ClaimantDataResponse {
   error?: string;
 }
 
-export async function GET() {
+interface EmploymentData {
+  indicators: {
+    name: string;
+    value: number;
+    unit: string;
+    gbAvg: number | null;
+    period: string;
+  }[];
+  claimantCount: {
+    rate: number | null;
+    count: number | null;
+    trend: string;
+    period: string;
+  };
+  source: string;
+  sourceUrl: string;
+}
+
+async function generateFreshData(ladNomis: string): Promise<EmploymentData | null> {
   try {
     // Fetch unemployment estimates, claimant count, and GB comparison in parallel
     const [unemploymentRes, claimantRes, gbUnemploymentRes] = await Promise.all([
-      // NM_127_1: Model-based unemployment estimates for Braintree
+      // NM_127_1: Model-based unemployment estimates for the LAD
       // item=1 (count), item=2 (rate)
       fetch(
-        `https://www.nomisweb.co.uk/api/v01/dataset/NM_127_1.data.json?geography=${BRAINTREE_GEO}&date=latest&measures=20100`,
+        `https://www.nomisweb.co.uk/api/v01/dataset/NM_127_1.data.json?geography=${ladNomis}&date=latest&measures=20100`,
         { next: { revalidate: 86400 } }
       ),
       // NM_162_1: Claimant count (JSA + UC)
       // gender=0 (all), age=0 (all ages), measure=1 (count)
       // Use latestMINUS2 because the most recent month is often provisional/empty
       fetch(
-        `https://www.nomisweb.co.uk/api/v01/dataset/NM_162_1.data.json?geography=${BRAINTREE_GEO}&date=latestMINUS2&gender=0&age=0&measure=1&measures=20100`,
+        `https://www.nomisweb.co.uk/api/v01/dataset/NM_162_1.data.json?geography=${ladNomis}&date=latestMINUS2&gender=0&age=0&measure=1&measures=20100`,
         { next: { revalidate: 86400 } }
       ),
       // GB-level unemployment for comparison
@@ -139,7 +167,7 @@ export async function GET() {
     // Fetch previous year claimant count for trend
     try {
       const prevRes = await fetch(
-        `https://www.nomisweb.co.uk/api/v01/dataset/NM_162_1.data.json?geography=${BRAINTREE_GEO}&date=latestMINUS14&gender=0&age=0&measure=1&measures=20100`,
+        `https://www.nomisweb.co.uk/api/v01/dataset/NM_162_1.data.json?geography=${ladNomis}&date=latestMINUS14&gender=0&age=0&measure=1&measures=20100`,
         { next: { revalidate: 86400 } }
       );
       if (prevRes.ok) {
@@ -159,16 +187,113 @@ export async function GET() {
       // Non-critical
     }
 
-    return NextResponse.json({
+    return {
       indicators,
       claimantCount,
       source: "NOMIS/ONS",
       sourceUrl: "https://www.nomisweb.co.uk/",
+    };
+  } catch (err) {
+    console.error("Employment data fetch failed:", err);
+    return null;
+  }
+}
+
+async function fetchAndUpdateCache(
+  ladNomis: string,
+  cacheDocRef: DocumentReference
+) {
+  try {
+    const fresh = await generateFreshData(ladNomis);
+    if (!fresh) return;
+
+    const existing = await cacheDocRef.get();
+    const existingData = existing.data()?.data ?? null;
+
+    if (existingData && JSON.stringify(existingData) === JSON.stringify(fresh)) {
+      return;
+    }
+
+    await cacheDocRef.set({
+      data: fresh,
+      updated_at: new Date().toISOString(),
     });
-  } catch {
+  } catch (err) {
+    console.error("Background employment cache update failed:", err);
+  }
+}
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const constituencySlug = searchParams.get("constituency") || "braintree";
+  const force = searchParams.get("force") === "1";
+  const constituencyData = getFullData(constituencySlug);
+
+  if (!constituencyData) {
+    return Response.json(
+      { error: "Invalid constituency slug" },
+      { status: 400 }
+    );
+  }
+
+  // Try data-layer LAD NOMIS code (first LAD for multi-LAD constituencies),
+  // else Braintree-only fallback. Multi-LAD constituencies use the first LAD
+  // only — acceptable approximation; aggregating across LADs would require
+  // separate per-LAD requests and weighted recombination.
+  const ladNomis =
+    constituencyData.areas?.lads?.[0]?.nomisCode?.toString() ??
+    (constituencySlug === "braintree" ? BRAINTREE_LAD_NOMIS : null);
+
+  if (!ladNomis) {
+    return Response.json(
+      {
+        error: "Employment data not available",
+        message: "LAD NOMIS code not yet sourced for this constituency",
+        constituency: constituencySlug,
+      },
+      { status: 400 }
+    );
+  }
+
+  const cacheDocRef = adminDb.collection("employment_cache").doc(constituencySlug);
+
+  type CacheDoc = { data: Record<string, unknown>; updated_at: string };
+  let cached: CacheDoc | null = null;
+  try {
+    const snap = await cacheDocRef.get();
+    if (snap.exists) {
+      cached = snap.data() as CacheDoc;
+    }
+  } catch (err) {
+    console.warn("Employment cache read failed (continuing without cache):", err);
+  }
+
+  if (cached && !force) {
+    const cacheAge = Date.now() - new Date(cached.updated_at).getTime();
+    if (cacheAge > TTL_MS) {
+      fetchAndUpdateCache(ladNomis, cacheDocRef)
+        .catch(err => console.warn("Employment background refresh failed:", err));
+    }
+    return NextResponse.json({ ...cached.data, source: "cache", _cachedAt: new Date(cached.updated_at).getTime() });
+  }
+
+  const fresh = await generateFreshData(ladNomis);
+  if (!fresh) {
     return NextResponse.json(
       { indicators: [], claimantCount: null, error: "Failed to fetch employment data" },
       { status: 500 }
     );
   }
+
+  const cachedAt = Date.now();
+  try {
+    await cacheDocRef.set({
+      data: fresh,
+      updated_at: new Date(cachedAt).toISOString(),
+    });
+  } catch (err) {
+    console.warn("Employment cache write failed (returning fresh anyway):", err);
+  }
+
+  return NextResponse.json({ ...fresh, _cachedAt: cachedAt });
 }
