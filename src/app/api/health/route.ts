@@ -8,55 +8,28 @@ export const maxDuration = 60;
 // PHE / OHID Fingertips API — free, no auth required
 // https://fingertips.phe.org.uk/api/
 //
-// STATUS (early 2026): the Fingertips data endpoints (/latest_data/*,
-// /all_data/*) are intermittently returning 500 errors. The metadata
-// endpoints (/area_types, /available_data) still work. We try multiple API
-// patterns and fall back to cached static data when the API is unavailable.
-//
-// The static fallback below is a Braintree-only snapshot from the last known
-// good Fingertips response, so we only use it for slug === "braintree". For
-// every other constituency the live API works when it works; when it fails,
-// we return an empty indicator list with a note rather than misattribute
-// Braintree's figures to another area.
+// The /latest_data/* JSON endpoints have returned 500 since early 2026.
+// The /all_data/csv/by_indicator_id endpoint still works — it returns all
+// historical time periods as a CSV, which we stream-parse, filter to the
+// district + England rows, and pick the latest period per indicator.
+// The 30-day Firestore cache means this large fetch only happens once/month.
 
-const TTL_MS = 30 * 24 * 60 * 60 * 1000; // Fingertips updates annually — monthly refresh is enough
+const TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
-const FINGERTIPS_API = "https://fingertips.phe.org.uk/api";
-
-// England benchmark area (used to compare against).
+const FINGERTIPS_CSV = "https://fingertips.phe.org.uk/api/all_data/csv/by_indicator_id";
 const ENGLAND = "E92000001";
 
-// Key health indicator IDs
-const INDICATORS: Record<number, { name: string; unit: string; invertSignificance?: boolean }> = {
-  90366: { name: "Life expectancy (male)", unit: "years" },
-  90362: { name: "Life expectancy (female)", unit: "years" },
-  92443: { name: "Smoking prevalence (adults)", unit: "%", invertSignificance: true },
-  93088: { name: "Obesity prevalence (adults)", unit: "%", invertSignificance: true },
-  93505: { name: "Child excess weight (Year 6)", unit: "%", invertSignificance: true },
-  92313: { name: "Under-75 mortality (all causes)", unit: "per 100,000", invertSignificance: true },
-  93495: { name: "Depression prevalence", unit: "%", invertSignificance: true },
-  90630: { name: "Fuel poverty", unit: "%", invertSignificance: true },
-};
+// Each spec selects one row from the CSV by indicator ID + Sex + Age.
+// Significance comes directly from the "Compared to England" text column.
+const INDICATOR_SPECS = [
+  { id: 90366, name: "Life expectancy (male)",      unit: "years", sex: "Male",    age: "All ages",  invertSig: false },
+  { id: 90366, name: "Life expectancy (female)",    unit: "years", sex: "Female",  age: "All ages",  invertSig: false },
+  { id: 92443, name: "Smoking prevalence (adults)", unit: "%",     sex: "Persons", age: "18+ yrs",   invertSig: true  },
+  { id: 93088, name: "Overweight or obese (adults)",unit: "%",     sex: "Persons", age: "18+ yrs",   invertSig: true  },
+  { id: 92313, name: "Employment rate (16-64)",     unit: "%",     sex: "Persons", age: "16-64 yrs", invertSig: false },
+];
 
-const INDICATOR_IDS = Object.keys(INDICATORS).join(",");
-
-// Area type IDs changed in 2023:
-// 101 = old lower tier local authorities (pre-2020)
-// 301 = lower tier local authorities (Apr 2020 - Mar 2021)
-// 501 = lower tier local authorities (post Apr 2023, current)
-const AREA_TYPE_IDS = [501, 301, 101];
-
-interface FingertipsDataPoint {
-  IndicatorId: number;
-  AreaCode: string;
-  Val: number | null;
-  Count: number | null;
-  Denom: number | null;
-  Sig: Record<string, number> | null;
-  TimePeriod: string;
-  TimePeriodSortable: number;
-  CategoryTypeId?: number;
-}
+const INDICATOR_IDS = "90366,92443,93088,92313";
 
 interface HealthIndicator {
   id: number;
@@ -77,73 +50,97 @@ interface HealthData {
   note?: string;
 }
 
-function getSignificance(
-  sig: Record<string, number> | null,
-  inverted: boolean
-): "better" | "similar" | "worse" | "unknown" {
-  if (!sig) return "unknown";
-  // Fingertips significance values: 1=worse, 2=similar, 3=better (vs England benchmark)
-  const sigValue = Object.values(sig)[0];
-  if (sigValue === undefined || sigValue === null) return "unknown";
-  if (sigValue === 3) return inverted ? "worse" : "better";
-  if (sigValue === 1) return inverted ? "better" : "worse";
-  if (sigValue === 2) return "similar";
+// Minimal CSV line parser — handles double-quoted fields containing commas.
+function parseCSVLine(line: string): string[] {
+  const result: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') { current += '"'; i++; }
+      else { inQuotes = !inQuotes; }
+    } else if (ch === "," && !inQuotes) {
+      result.push(current); current = "";
+    } else {
+      current += ch;
+    }
+  }
+  result.push(current);
+  return result;
+}
+
+function sigFromText(text: string, invert: boolean): "better" | "similar" | "worse" | "unknown" {
+  const t = text.trim().toLowerCase();
+  if (t === "better") return invert ? "worse" : "better";
+  if (t === "worse")  return invert ? "better" : "worse";
+  if (t === "similar") return "similar";
   return "unknown";
 }
 
-function formatPeriod(timePeriod: string): string {
-  return timePeriod;
-}
+async function fetchFromCSV(districtCode: string): Promise<HealthIndicator[]> {
+  const url = `${FINGERTIPS_CSV}?indicator_ids=${INDICATOR_IDS}&child_area_type_id=501&parent_area_type_id=15&parent_area_code=${ENGLAND}`;
+  const res = await fetch(url, {
+    headers: { Accept: "text/csv" },
+    signal: AbortSignal.timeout(45000),
+  });
+  if (!res.ok) throw new Error(`Fingertips CSV ${res.status}`);
 
-// Try fetching from Fingertips with multiple area type IDs / strategies.
-async function tryFingertipsFetch(districtCode: string): Promise<FingertipsDataPoint[] | null> {
-  for (const areaTypeId of AREA_TYPE_IDS) {
-    // Strategy 1: specific indicators for child areas of England
-    try {
-      const url = `${FINGERTIPS_API}/latest_data/specific_indicators_for_child_areas?indicator_ids=${INDICATOR_IDS}&parent_area_code=${ENGLAND}&child_area_type_id=${areaTypeId}&parent_area_type_id=15`;
-      const res = await fetch(url, {
-        next: { revalidate: 86400 },
-        headers: { Accept: "application/json" },
-        signal: AbortSignal.timeout(10000),
-      });
+  const text = await res.text();
+  const lines = text.split("\n");
 
-      if (res.ok) {
-        const contentType = res.headers.get("content-type") || "";
-        if (contentType.includes("json")) {
-          const data = await res.json();
-          if (Array.isArray(data) && data.length > 0) {
-            return data;
-          }
-        }
-      }
-    } catch {
-      // Try next strategy
-    }
+  // CSV columns (0-indexed): 0=IndicatorId 4=AreaCode 7=Sex 8=Age
+  // 9=CategoryType 11=TimePeriod 12=Value 21=ComparedToEngland 23=TimePeriodSortable
+  type BestRow = { value: number; sig: string; period: string; sortable: number; englandAvg: number | null };
+  const localBest = new Map<string, BestRow>(); // key = "id|sex|age"
+  const englandBest = new Map<string, BestRow>();
 
-    // Strategy 2: by area code directly
-    try {
-      const url = `${FINGERTIPS_API}/latest_data/by_area_code?area_code=${districtCode}&area_type_id=${areaTypeId}`;
-      const res = await fetch(url, {
-        next: { revalidate: 86400 },
-        headers: { Accept: "application/json" },
-        signal: AbortSignal.timeout(10000),
-      });
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const cols = parseCSVLine(line);
+    if (cols.length < 24) continue;
 
-      if (res.ok) {
-        const contentType = res.headers.get("content-type") || "";
-        if (contentType.includes("json")) {
-          const data = await res.json();
-          if (Array.isArray(data) && data.length > 0) {
-            return data;
-          }
-        }
-      }
-    } catch {
-      // Try next area type
+    const areaCode    = cols[4].trim();
+    const categoryType = cols[9].trim();
+    if (categoryType !== "") continue; // skip breakdowns
+    if (areaCode !== districtCode && areaCode !== ENGLAND) continue;
+
+    const indicatorId = parseInt(cols[0], 10);
+    const sex         = cols[7].trim();
+    const age         = cols[8].trim();
+    const sortable    = parseInt(cols[23], 10) || 0;
+    const value       = parseFloat(cols[12]);
+    const sig         = cols[21].trim();
+    const period      = cols[11].trim();
+
+    if (isNaN(value)) continue;
+
+    const key = `${indicatorId}|${sex}|${age}`;
+    const map = areaCode === ENGLAND ? englandBest : localBest;
+    const existing = map.get(key);
+    if (!existing || sortable > existing.sortable) {
+      map.set(key, { value, sig, period, sortable, englandAvg: null });
     }
   }
 
-  return null;
+  const indicators: HealthIndicator[] = [];
+  for (const spec of INDICATOR_SPECS) {
+    const key = `${spec.id}|${spec.sex}|${spec.age}`;
+    const local   = localBest.get(key);
+    const england = englandBest.get(key);
+    if (!local) continue;
+    indicators.push({
+      id: spec.id,
+      name: spec.name,
+      value: local.value,
+      unit: spec.unit,
+      englandAvg: england?.value ?? null,
+      significance: sigFromText(local.sig, spec.invertSig),
+      period: local.period,
+    });
+  }
+  return indicators;
 }
 
 async function generateFreshData(
@@ -152,63 +149,33 @@ async function generateFreshData(
   constituencySlug: string
 ): Promise<HealthData> {
   try {
-    const data = await tryFingertipsFetch(districtCode);
-
-    if (data && data.length > 0) {
-      const localData = data.filter(
-        (d) => d.AreaCode === districtCode && !d.CategoryTypeId
-      );
-      const englandData = data.filter(
-        (d) => d.AreaCode === ENGLAND && !d.CategoryTypeId
-      );
-
-      const indicators = processIndicators(
-        localData.length > 0 ? localData : data.filter((d) => !d.CategoryTypeId),
-        englandData.length > 0 ? englandData : null
-      );
-
-      if (indicators.length > 0) {
-        return {
-          indicators,
-          areaName: districtName,
-          areaCode: districtCode,
-          source: "PHE Fingertips",
-          sourceUrl: "https://fingertips.phe.org.uk",
-        };
-      }
+    const indicators = await fetchFromCSV(districtCode);
+    if (indicators.length > 0) {
+      return {
+        indicators,
+        areaName: districtName,
+        areaCode: districtCode,
+        source: "PHE Fingertips",
+        sourceUrl: "https://fingertips.phe.org.uk",
+      };
     }
   } catch (err) {
-    console.error("Health API error:", err);
+    console.error("Health CSV fetch failed:", err);
   }
-
-  return getFallbackData(districtCode, districtName, constituencySlug);
+  return getFallbackData(districtCode, districtName);
 }
 
 function getFallbackData(
   districtCode: string,
   districtName: string,
-  constituencySlug: string
 ): HealthData {
-  // The static fallback below is a Braintree-only snapshot. For any other
-  // constituency, return an empty result rather than mislabel Braintree's
-  // stats as theirs.
-  if (constituencySlug !== "braintree") {
-    return {
-      indicators: [],
-      areaName: districtName,
-      areaCode: districtCode,
-      source: "PHE Fingertips (unavailable)",
-      sourceUrl: "https://fingertips.phe.org.uk",
-      note: "Fingertips data endpoints are currently unavailable. Static fallback not yet sourced for this constituency.",
-    };
-  }
-
   return {
-    indicators: FALLBACK_INDICATORS,
+    indicators: [],
     areaName: districtName,
     areaCode: districtCode,
-    source: "PHE Fingertips (cached)",
+    source: "PHE Fingertips (unavailable)",
     sourceUrl: "https://fingertips.phe.org.uk",
+    note: "Health data temporarily unavailable.",
   };
 }
 
@@ -289,69 +256,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ ...fresh, _cachedAt: cachedAt });
   } catch (err) {
     console.error("Health route error:", err);
-    return NextResponse.json(getFallbackData(districtCode, districtName, constituencySlug));
+    return NextResponse.json(getFallbackData(districtCode, districtName));
   }
 }
 
-function processIndicators(
-  localData: FingertipsDataPoint[],
-  englandData: FingertipsDataPoint[] | null
-): HealthIndicator[] {
-  const indicators: HealthIndicator[] = [];
-
-  const localByIndicator = new Map<number, FingertipsDataPoint>();
-  for (const d of localData) {
-    const indicatorMeta = INDICATORS[d.IndicatorId];
-    if (!indicatorMeta) continue;
-    const existing = localByIndicator.get(d.IndicatorId);
-    if (!existing || d.TimePeriodSortable > existing.TimePeriodSortable) {
-      localByIndicator.set(d.IndicatorId, d);
-    }
-  }
-
-  const englandByIndicator = new Map<number, FingertipsDataPoint>();
-  if (englandData) {
-    for (const d of englandData) {
-      if (!INDICATORS[d.IndicatorId]) continue;
-      const existing = englandByIndicator.get(d.IndicatorId);
-      if (!existing || d.TimePeriodSortable > existing.TimePeriodSortable) {
-        englandByIndicator.set(d.IndicatorId, d);
-      }
-    }
-  }
-
-  for (const [indicatorId, meta] of Object.entries(INDICATORS)) {
-    const id = Number(indicatorId);
-    const localPoint = localByIndicator.get(id);
-    const englandPoint = englandByIndicator.get(id);
-
-    if (!localPoint) continue;
-
-    indicators.push({
-      id,
-      name: meta.name,
-      value: localPoint.Val,
-      unit: meta.unit,
-      englandAvg: englandPoint?.Val ?? null,
-      significance: getSignificance(
-        localPoint.Sig,
-        meta.invertSignificance ?? false
-      ),
-      period: formatPeriod(localPoint.TimePeriod),
-    });
-  }
-
-  return indicators;
-}
-
-// Static fallback data from last known good Fingertips data for Braintree
-const FALLBACK_INDICATORS: HealthIndicator[] = [
-  { id: 90366, name: "Life expectancy (male)", value: 81.2, unit: "years", englandAvg: 79.4, significance: "better", period: "2020-22" },
-  { id: 90362, name: "Life expectancy (female)", value: 84.1, unit: "years", englandAvg: 83.1, significance: "similar", period: "2020-22" },
-  { id: 92443, name: "Smoking prevalence (adults)", value: 11.8, unit: "%", englandAvg: 12.7, significance: "similar", period: "2022" },
-  { id: 93088, name: "Obesity prevalence (adults)", value: 24.3, unit: "%", englandAvg: 25.9, significance: "similar", period: "2021/22" },
-  { id: 93505, name: "Child excess weight (Year 6)", value: 32.1, unit: "%", englandAvg: 37.8, significance: "better", period: "2022/23" },
-  { id: 92313, name: "Under-75 mortality (all causes)", value: 285.4, unit: "per 100,000", englandAvg: 306.8, significance: "better", period: "2020-22" },
-  { id: 93495, name: "Depression prevalence", value: 13.2, unit: "%", englandAvg: 12.7, significance: "similar", period: "2022/23" },
-  { id: 90630, name: "Fuel poverty", value: 11.9, unit: "%", englandAvg: 13.1, significance: "similar", period: "2022" },
-];

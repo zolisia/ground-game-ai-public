@@ -80,20 +80,27 @@ const DEEP_ROUTES = [
 
 async function hitUrl(url: string): Promise<{ ok: boolean; url: string }> {
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+    // 55s gives slow routes (health CSV, EC scraper) time to complete.
+    const res = await fetch(url, { signal: AbortSignal.timeout(55_000) });
     return { ok: res.ok, url };
   } catch {
     return { ok: false, url };
   }
 }
 
-// Warm a single slug — all provided routes in parallel
+// Warm a single slug — all provided routes in parallel.
+// force=true: bypass Firestore cache and re-fetch from source (used for
+//   live/full scopes where data must be fresh).
+// force=false: let each route honour its own TTL (used for the 4am deep scope
+//   so cache hits return in <1s and only genuinely stale data is re-fetched).
 async function warmSlug(
   baseUrl: string,
   slug: string,
-  routes: string[]
+  routes: string[],
+  force = true
 ): Promise<{ ok: number; failed: string[] }> {
-  const urls = routes.map((r) => `${baseUrl}${r}?constituency=${slug}&force=1`);
+  const suffix = force ? "&force=1" : "";
+  const urls = routes.map((r) => `${baseUrl}${r}?constituency=${slug}${suffix}`);
   const results = await Promise.allSettled(urls.map(hitUrl));
 
   const failed: string[] = [];
@@ -113,10 +120,11 @@ async function warmSlug(
 async function warmBatch(
   baseUrl: string,
   slugs: string[],
-  routes: string[]
+  routes: string[],
+  force = true
 ): Promise<{ ok: number; failed: number }> {
   const results = await Promise.allSettled(
-    slugs.map((slug) => warmSlug(baseUrl, slug, routes))
+    slugs.map((slug) => warmSlug(baseUrl, slug, routes, force))
   );
   let ok = 0;
   let failed = 0;
@@ -191,13 +199,39 @@ export async function GET(request: Request) {
     totalOk += census.ok;
     totalFailed += census.failed;
   } else if (scope === "deep") {
-    // 4am daily: key routes for ALL 650 constituencies in parallel batches of 30
+    // 4am daily: key routes for ALL 650 constituencies in parallel batches of 30.
+    // No force flag — routes honour their own TTL so cache hits return in <1s.
+    // This keeps the total run time well within the 300s Vercel limit.
+    // Only genuinely stale or missing cache entries trigger external API calls.
     const BATCH_SIZE = 30;
     for (let i = 0; i < ALL_SLUGS.length; i += BATCH_SIZE) {
       const batch = ALL_SLUGS.slice(i, i + BATCH_SIZE);
-      const r = await warmBatch(baseUrl, batch, DEEP_ROUTES);
+      const r = await warmBatch(baseUrl, batch, DEEP_ROUTES, false);
       totalOk += r.ok;
       totalFailed += r.failed;
+    }
+
+    // Health is warmed separately — no force flag so the 30-day Firestore TTL
+    // is respected. Cache hits return in <1s; cold fetches download a ~233k-line
+    // CSV from Fingertips (~30-45s), so we use a 55s timeout and smaller batches
+    // to avoid hammering the endpoint. In steady state (post-first-run) this
+    // entire block completes in a few seconds.
+    const HEALTH_BATCH_SIZE = 15;
+    for (let i = 0; i < ALL_SLUGS.length; i += HEALTH_BATCH_SIZE) {
+      const batch = ALL_SLUGS.slice(i, i + HEALTH_BATCH_SIZE);
+      const results = await Promise.allSettled(
+        batch.map((slug) =>
+          fetch(`${baseUrl}/api/health?constituency=${slug}`, {
+            signal: AbortSignal.timeout(55_000),
+          })
+            .then((r) => r.ok)
+            .catch(() => false)
+        )
+      );
+      for (const r of results) {
+        if (r.status === "fulfilled" && r.value) totalOk++;
+        else totalFailed++;
+      }
     }
   }
 
