@@ -115,49 +115,10 @@ export async function GET(request: Request) {
   }
 }
 
-// Fallback data from DEFRA AURN monitoring network near Braintree.
-// TODO: this fallback is still Braintree-specific — the three hardcoded stations
-// (Chelmsford / Colchester / Southend) are only roughly relevant for constituencies
-// in the East of England. Misleading for distant constituencies (e.g. Scotland).
-// Multi-constituency support would require a per-constituency nearest-stations
-// lookup or sourcing DEFRA AURN station coords by region.
 function getFallbackData() {
   return {
-    stations: [
-      {
-        id: 1,
-        name: "Chelmsford",
-        lat: 51.7356,
-        lng: 0.4685,
-        parameters: [
-          { parameter: "pm25", lastValue: 11, unit: "µg/m³" },
-          { parameter: "no2", lastValue: 18, unit: "µg/m³" },
-          { parameter: "pm10", lastValue: 16, unit: "µg/m³" },
-        ],
-      },
-      {
-        id: 2,
-        name: "Colchester",
-        lat: 51.8959,
-        lng: 0.8919,
-        parameters: [
-          { parameter: "pm25", lastValue: 9, unit: "µg/m³" },
-          { parameter: "no2", lastValue: 15, unit: "µg/m³" },
-        ],
-      },
-      {
-        id: 3,
-        name: "Southend-on-Sea",
-        lat: 51.5440,
-        lng: 0.6788,
-        parameters: [
-          { parameter: "pm25", lastValue: 12, unit: "µg/m³" },
-          { parameter: "no2", lastValue: 22, unit: "µg/m³" },
-          { parameter: "o3", lastValue: 45, unit: "µg/m³" },
-        ],
-      },
-    ],
+    stations: [],
     source: "fallback",
-    note: "OpenAQ now requires API key. Showing nearest DEFRA AURN stations. Register at openaq.org for live data.",
+    note: "Live air quality data unavailable. OpenAQ now requires an API key — register free at openaq.org.",
   };
 }
