@@ -18,7 +18,7 @@ Last audited: 2026-06-20
 - **EPCPanel** — needs `EPC_API_KEY` + `EPC_EMAIL`. Register at epc.opendatacommunities.org (free, instant).
 - **MentionsFeed** — needs `X_BEARER_TOKEN` or `APIFY_API_TOKEN`.
 - **OppositionTracker** — needs `APIFY_API_TOKEN` for live posts; shows candidate list only without it.
-- **HealthPanel** — Fingertips API broken since early 2026 (endpoints changed). Shows Braintree static snapshot for Braintree, empty state for others.
+- **HealthPanel** — fully built. Fingertips CSV endpoint works; the route parses the ~233k-line response and caches in Firestore for 30 days. Included in 4am deep warm (separate health block, no force flag, 55s timeout). Cold first-load takes 30-45s; all subsequent loads from cache. Priority constituencies also warmed every 2 hours via STANDARD_ROUTES.
 - **CQCPanel** — CQC API returns 403; falls back to hardcoded Braintree directory. Other constituencies show "not yet sourced".
 
 ## PRs to open upstream (Steve-Aaron)
