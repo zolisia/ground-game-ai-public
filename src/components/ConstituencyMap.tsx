@@ -88,6 +88,14 @@ interface PlanningApp {
   url: string;
 }
 
+function zoomFromBbox(bbox: [number, number, number, number]): number {
+  const maxDeg = Math.max(bbox[2] - bbox[0], bbox[3] - bbox[1]);
+  if (maxDeg < 0.12) return 12;
+  if (maxDeg < 0.25) return 11;
+  if (maxDeg < 0.5) return 10;
+  return 9;
+}
+
 export default function ConstituencyMap() {
   const { slug } = useConstituency();
   const isEnglishConstituency = getFullData(slug)?.constituency.onsCode.startsWith("E14") ?? false;
@@ -147,7 +155,7 @@ export default function ConstituencyMap() {
     const data = getFullData(slug);
     const center: [number, number] =
       data?.geo ? [data.geo.lng, data.geo.lat] : constituencyGeo.center;
-    const zoom = constituencyGeo.zoom;
+    const zoom = data?.geo?.bbox ? zoomFromBbox(data.geo.bbox) : constituencyGeo.zoom;
 
     const m = new maplibregl.Map({
       container: mapContainer.current,
@@ -178,8 +186,10 @@ export default function ConstituencyMap() {
           fetch(withConstituency("/api/electoral-calculus?type=seat", slug)).catch(() => null),
         ]);
 
-        // Build live EC ward lookup, falling back to static data
-        let wardElectoralCalc = fallbackWardElectoralCalc;
+        // Build live EC ward lookup. Static fallback only applies to Braintree —
+        // for other constituencies an empty object is correct when EC data is unavailable.
+        let wardElectoralCalc: Record<string, { electorate: number; winner2024: string; predictedWinner: string }> =
+          slug === "braintree" ? fallbackWardElectoralCalc : {};
         try {
           if (ecRes && ecRes.ok) {
             const ecData = await ecRes.json();
@@ -226,7 +236,9 @@ export default function ConstituencyMap() {
         // Enrich ward features
         // Normalize ward names: GeoJSON uses "&" but EC/data may use "and" or vice versa
         const norm = (s: string) => s.replace(/\s*&\s*/g, " and ").replace(/\s+/g, " ").trim();
-        const wardLookup = new Map(wardData.map((w) => [norm(w.name), w]));
+        const wardLookup = slug === "braintree"
+          ? new Map(wardData.map((w) => [norm(w.name), w]))
+          : new Map();
         // Build EC lookup with normalized keys
         const ecNorm: Record<string, typeof wardElectoralCalc[string]> = {};
         for (const [k, v] of Object.entries(wardElectoralCalc)) {
@@ -491,7 +503,7 @@ export default function ConstituencyMap() {
                     <div style="font-size:11px;color:#94a3b8;">${crime.street}</div>
                     ${crime.month ? `<div style="font-size:10px;color:#71717a;margin-top:2px;">${crime.month}</div>` : ""}
                     ${crime.outcome ? `<div style="font-size:10px;color:#a1a1aa;margin-top:1px;">Outcome: ${crime.outcome}</div>` : ""}
-                    <a href="https://www.police.uk/pu/your-area/essex-police/braintree/?tab=CrimeMap" target="_blank" rel="noopener noreferrer" style="font-size:10px;color:#6ee7b7;text-decoration:none;margin-top:4px;display:inline-block;">View area crime map ↗</a>
+                    <a href="https://www.police.uk" target="_blank" rel="noopener noreferrer" style="font-size:10px;color:#6ee7b7;text-decoration:none;margin-top:4px;display:inline-block;">View area crime map ↗</a>
                   </div>`
                 )
               )

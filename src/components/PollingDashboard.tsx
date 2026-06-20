@@ -126,11 +126,6 @@ interface PollingData {
 
 type Section = "intention" | "seats" | "leaders" | "issues" | "local" | "trackers";
 
-// 2024 Braintree result
-const BRAINTREE_2024 = {
-  con: 35.52, lab: 28.03, reform: 23.14, ld: 5.87, green: 5.87,
-  majority: 3668, electorate: 78543, turnout: 62.4,
-};
 
 function CustomTooltip({
   active,
@@ -186,7 +181,10 @@ function TrackerTooltip({
 
 export default function PollingDashboard() {
   const { slug } = useConstituency();
-  const constituencyName = getFullData(slug)?.constituency.name ?? "Constituency";
+  const fullData = getFullData(slug);
+  const constituencyName = fullData?.constituency.name ?? "Constituency";
+  const results2024 = fullData?.constituency.results2024 ?? null;
+  const electorate2024 = fullData?.constituency.electorate ?? 0;
   const [data, setData] = useState<PollingData | null>(null);
   const [ecNational, setEcNational] = useState<ECNational | null>(null);
   const [ecConstituency, setEcConstituency] = useState<ECConstituency | null>(null);
@@ -415,12 +413,12 @@ export default function PollingDashboard() {
 
         {/* ══════ LOCAL POLLING ══════ */}
         {section === "local" && (
-          slug === "braintree" ? (
-            <BraintreeLocalSection averages={data.averages} ecConstituency={ecConstituency} constituencyName={constituencyName} />
+          results2024 ? (
+            <LocalSection averages={data.averages} ecConstituency={ecConstituency} constituencyName={constituencyName} results2024={results2024} electorate={electorate2024} />
           ) : (
             <div className="p-4 text-center">
               <div className="text-xs text-zinc-500">
-                Local polling projection not yet available for {constituencyName}.
+                Local polling data not yet available for {constituencyName}.
               </div>
             </div>
           )
@@ -834,44 +832,69 @@ function SeatProjectionSection({ averages, ecNational }: { averages: Record<stri
 }
 
 // ═══════════════════════════════════════════════════
-// BRAINTREE LOCAL SECTION — EC MRP + UNS fallback
+// LOCAL SECTION — EC MRP + UNS fallback
 // ═══════════════════════════════════════════════════
 
-function BraintreeLocalSection({ averages, ecConstituency, constituencyName }: { averages: Record<string, number>; ecConstituency: ECConstituency | null; constituencyName: string }) {
+interface Results2024Shape {
+  conShare: number; labShare: number; ldShare: number; reformShare: number; greenShare: number;
+  turnoutPct: number; winner: string; majority: number;
+}
+
+function LocalSection({ averages, ecConstituency, constituencyName, results2024, electorate }: {
+  averages: Record<string, number>;
+  ecConstituency: ECConstituency | null;
+  constituencyName: string;
+  results2024: Results2024Shape;
+  electorate: number;
+}) {
   const national2024: Record<string, number> = { con: 23.7, lab: 33.7, reform: 14.3, ld: 12.2, green: 6.8 };
+
+  const base2024: Record<string, number> = {
+    con: results2024.conShare,
+    lab: results2024.labShare,
+    reform: results2024.reformShare,
+    ld: results2024.ldShare,
+    green: results2024.greenShare,
+  };
+
+  const winnerKeyMap: Record<string, string> = { Con: "con", Lab: "lab", LD: "ld", Reform: "reform", Green: "green" };
+  const currentHolder = winnerKeyMap[results2024.winner] ?? "con";
+
   const useEC = !!ecConstituency && Object.keys(ecConstituency.predicted).length > 0;
 
   // Build local projection from EC data or UNS fallback
   const localProjection: Record<string, number> = {};
-  const braintreeBase = BRAINTREE_2024 as Record<string, number>;
   if (useEC) {
-    // Use EC's MRP predicted shares
     const p = ecConstituency!.predicted;
     const keyMap: Record<string, string> = { CON: "con", LAB: "lab", Reform: "reform", LIB: "ld", Green: "green" };
     for (const [ecKey, partyKey] of Object.entries(keyMap)) {
       localProjection[partyKey] = p[ecKey]?.share || 0;
     }
-    // If EC didn't return predicted data, fall back to UNS
     if (Object.values(localProjection).every(v => v === 0)) {
       for (const party of ["con", "lab", "reform", "ld", "green"]) {
         const nationalSwing = (averages[party] || 0) - national2024[party];
-        localProjection[party] = Math.max(0, Math.round((braintreeBase[party] + nationalSwing) * 10) / 10);
+        localProjection[party] = Math.max(0, Math.round((base2024[party] + nationalSwing) * 10) / 10);
       }
     }
   } else {
-    // UNS fallback
     for (const party of ["con", "lab", "reform", "ld", "green"]) {
       const nationalSwing = (averages[party] || 0) - national2024[party];
-      localProjection[party] = Math.max(0, Math.round((braintreeBase[party] + nationalSwing) * 10) / 10);
+      localProjection[party] = Math.max(0, Math.round((base2024[party] + nationalSwing) * 10) / 10);
     }
   }
+
+  // Top 2 challengers by 2024 vote share (for vulnerability analysis)
+  const topChallengers = (["con", "lab", "reform", "ld", "green"] as const)
+    .filter(p => p !== currentHolder)
+    .sort((a, b) => (base2024[b] ?? 0) - (base2024[a] ?? 0))
+    .slice(0, 2);
+  const holderShare = base2024[currentHolder] ?? 0;
 
   // Determine projected winner
   const sorted = Object.entries(localProjection).sort((a, b) => b[1] - a[1]);
   const projectedWinner = sorted[0];
   const projectedSecond = sorted[1];
   const projectedMajority = (projectedWinner[1] - projectedSecond[1]).toFixed(1);
-  const currentHolder = "con";
   const wouldChange = projectedWinner[0] !== currentHolder;
 
   // EC winning probabilities
@@ -957,7 +980,7 @@ function BraintreeLocalSection({ averages, ecConstituency, constituencyName }: {
         <p className="text-[11px] text-zinc-500 mb-2">2024 Result vs Current Projection</p>
         <div className="space-y-2">
           {(["con", "reform", "lab", "ld", "green"] as const).map((party) => {
-            const actual = BRAINTREE_2024[party];
+            const actual = base2024[party] ?? 0;
             const projected = localProjection[party];
             const change = projected - actual;
             return (
@@ -1000,18 +1023,18 @@ function BraintreeLocalSection({ averages, ecConstituency, constituencyName }: {
       <div className="grid grid-cols-3 gap-2">
         <div className="bg-muted/30 border border-border/50 px-3 py-2 text-center">
           <p className="text-base font-bold text-zinc-100">
-            {(useEC && ecConstituency!.electorate > 0 ? ecConstituency!.electorate : BRAINTREE_2024.electorate).toLocaleString()}
+            {(useEC && ecConstituency!.electorate > 0 ? ecConstituency!.electorate : electorate).toLocaleString()}
           </p>
           <p className="text-[9px] text-zinc-600 uppercase tracking-wider">Electorate</p>
         </div>
         <div className="bg-muted/30 border border-border/50 px-3 py-2 text-center">
           <p className="text-base font-bold text-zinc-100">
-            {(useEC && ecConstituency!.turnout > 0 ? ecConstituency!.turnout : BRAINTREE_2024.turnout)}%
+            {(useEC && ecConstituency!.turnout > 0 ? ecConstituency!.turnout : results2024.turnoutPct)}%
           </p>
           <p className="text-[9px] text-zinc-600 uppercase tracking-wider">2024 Turnout</p>
         </div>
         <div className="bg-muted/30 border border-border/50 px-3 py-2 text-center">
-          <p className="text-base font-bold text-zinc-100">{BRAINTREE_2024.majority.toLocaleString()}</p>
+          <p className="text-base font-bold text-zinc-100">{results2024.majority.toLocaleString()}</p>
           <p className="text-[9px] text-zinc-600 uppercase tracking-wider">2024 Majority</p>
         </div>
       </div>
@@ -1050,30 +1073,25 @@ function BraintreeLocalSection({ averages, ecConstituency, constituencyName }: {
       <div className="bg-muted/30 border border-border/50 px-4 py-3">
         <p className="text-[11px] text-zinc-400 font-medium mb-2">Vulnerability Analysis</p>
         <div className="space-y-1.5 text-[11px]">
-          <div className="flex justify-between">
-            <span className="text-zinc-500">Swing needed for Reform to win:</span>
-            <span className="font-bold" style={{ color: PARTY_COLORS.reform }}>
-              {((BRAINTREE_2024.con - BRAINTREE_2024.reform) / 2).toFixed(1)}%
-            </span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-zinc-500">Swing needed for Labour to win:</span>
-            <span className="font-bold" style={{ color: PARTY_COLORS.lab }}>
-              {((BRAINTREE_2024.con - BRAINTREE_2024.lab) / 2).toFixed(1)}%
-            </span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-zinc-500">Current national swing to Reform:</span>
-            <span className="font-bold text-emerald-400">
-              +{((averages.reform || 0) - national2024.reform).toFixed(1)}%
-            </span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-zinc-500">Current national swing to Labour:</span>
-            <span className={`font-bold ${(averages.lab || 0) - national2024.lab > 0 ? "text-emerald-400" : "text-red-400"}`}>
-              {((averages.lab || 0) - national2024.lab) > 0 ? "+" : ""}{((averages.lab || 0) - national2024.lab).toFixed(1)}%
-            </span>
-          </div>
+          {topChallengers.map((challenger) => {
+            const swingNeeded = ((holderShare - (base2024[challenger] ?? 0)) / 2).toFixed(1);
+            const nationalSwing = (averages[challenger] || 0) - (national2024[challenger] || 0);
+            const swingPositive = nationalSwing > 0;
+            return (
+              <div key={challenger} className="contents">
+                <div className="flex justify-between">
+                  <span className="text-zinc-500">Swing needed for {PARTY_NAMES[challenger]} to win:</span>
+                  <span className="font-bold" style={{ color: PARTY_COLORS[challenger] }}>{swingNeeded}%</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-zinc-500">Current national swing to {PARTY_NAMES[challenger]}:</span>
+                  <span className={`font-bold ${swingPositive ? "text-emerald-400" : "text-red-400"}`}>
+                    {swingPositive ? "+" : ""}{nationalSwing.toFixed(1)}%
+                  </span>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 

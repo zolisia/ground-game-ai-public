@@ -84,11 +84,6 @@ interface BriefData {
   usage?: unknown;
 }
 
-// NOTE: AI brief content accuracy depends on upstream routes being multi-
-// constituency. Currently only /api/parliament honours the ?constituency
-// parameter. /api/news, /api/crime, and /api/fixmystreet will return Braintree
-// data regardless of the param until they're refactored — at which point this
-// route's accuracy improves automatically with no further changes here.
 async function fetchLocalData(baseUrl: string, slug: string): Promise<DataSources> {
   const c = encodeURIComponent(slug);
   const endpoints = [
