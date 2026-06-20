@@ -38,7 +38,6 @@ import UniversalCreditPanel from "@/components/UniversalCreditPanel";
 import EPCPanel from "@/components/EPCPanel";
 import CQCPanel from "@/components/CQCPanel";
 import PetitionsPanel from "@/components/PetitionsPanel";
-import WardDataHub from "@/components/WardDataHub";
 import CommonsLibraryPanel from "@/components/CommonsLibraryPanel";
 import {
   Map,
@@ -64,7 +63,6 @@ import {
   CreditCard,
   Zap,
   Stethoscope,
-  LayoutGrid,
 } from "lucide-react";
 
 export default function DashboardPage() {
@@ -303,14 +301,6 @@ function Dashboard() {
                 <AIBrief />
               </Panel>
 
-              {/* Ward Explorer — all ward data in one place */}
-              <Panel
-                title="Ward Explorer"
-                icon={<LayoutGrid className="h-3.5 w-3.5" />}
-                className="lg:col-span-12"
-              >
-                <WardDataHub />
-              </Panel>
             </div>
           )}
 
