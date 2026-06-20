@@ -1,10 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-  ecPrediction as fallbackEcPrediction,
-  wardElectoralCalc as fallbackWardElectoralCalc,
-} from "@/data/braintree";
 import { useConstituency, withConstituency } from "@/hooks/useConstituency";
 
 const partyColors: Record<string, string> = {
@@ -62,13 +58,17 @@ export default function ECPrediction() {
     predicted: Record<string, number>;
     winningChances: Record<string, number>;
     lastUpdated: string;
-  }>(fallbackEcPrediction);
+  } | null>(null);
   const [wardElectoralCalc, setWardElectoralCalc] = useState<
     Record<string, { electorate: number; winner2024: string; predictedWinner: string }>
-  >(fallbackWardElectoralCalc);
-  const [dataSource, setDataSource] = useState<"fallback" | "live">("fallback");
+  >({});
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setLoading(true);
+    setPred(null);
+    setWardElectoralCalc({});
+
     async function fetchLiveEC() {
       try {
         const res = await fetch(withConstituency("/api/electoral-calculus?type=seat", slug));
@@ -76,7 +76,6 @@ export default function ECPrediction() {
         const data: ECConstituencyData = await res.json();
         if (data.prediction && Object.keys(data.predicted).length > 0) {
           setPred(toLiveEcPrediction(data));
-          setDataSource("live");
         }
         if (data.wards && data.wards.length > 0) {
           const liveWards = toLiveWardData(data.wards);
@@ -85,12 +84,33 @@ export default function ECPrediction() {
           }
         }
       } catch {
-        // Keep fallback data
+        // leave as null — caller renders empty state
+      } finally {
+        setLoading(false);
       }
     }
     fetchLiveEC();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
+
+  if (loading) {
+    return (
+      <div className="p-4 space-y-3">
+        <div className="text-xs text-zinc-500">Loading MRP prediction...</div>
+        {[...Array(3)].map((_, i) => (
+          <div key={i} className="h-12 bg-muted/50 rounded-lg animate-pulse" />
+        ))}
+      </div>
+    );
+  }
+
+  if (!pred) {
+    return (
+      <div className="p-4 text-xs text-zinc-500">
+        Electoral Calculus prediction not available for this constituency.
+      </div>
+    );
+  }
 
   const wards = Object.entries(wardElectoralCalc);
 
@@ -215,7 +235,6 @@ export default function ECPrediction() {
 
       <div className="text-[10px] text-zinc-700 text-center">
         Source: Electoral Calculus MRP &middot; Updated {pred.lastUpdated}
-        {dataSource === "live" && <span className="text-emerald-600 ml-1">(live)</span>}
       </div>
     </div>
   );
